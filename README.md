@@ -85,6 +85,8 @@ Railway can deploy this directly from GitHub. `railway.json` already sets:
 - `/healthz` health check
 - restart-on-failure policy
 
+Keep this as a single app worker for now. The MQTT uplink listener runs in-process, so multiple gunicorn workers would create duplicate subscriptions and duplicate SSE events.
+
 Deploy flow:
 
 1. Push this folder to GitHub as its own repo.
