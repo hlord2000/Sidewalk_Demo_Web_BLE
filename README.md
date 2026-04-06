@@ -1,6 +1,9 @@
 # Sidewalk Web Demo
 
-NOTE: use [https://apps.apple.com/us/app/bluefy-web-ble-browser/id1492822055](Bluefy) on iOS to properly access
+# For info on firmware: https://github.com/hlord2000/ncs-sidewalk-demo-application
+
+## NOTE: use [https://apps.apple.com/us/app/bluefy-web-ble-browser/id1492822055](Bluefy) on iOS to properly access
+
 
 Flask web app for a Sidewalk device demo:
 
