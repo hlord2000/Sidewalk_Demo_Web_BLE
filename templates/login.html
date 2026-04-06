@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Sign In{% endblock %}
+{% block body %}
+<main class="login-shell">
+  <section class="login-card">
+    <p class="eyebrow">Nordic Demo Access</p>
+    <h1>Sidewalk Control</h1>
+    <p class="muted">Authenticated access for cloud messaging and BLE shell control. This browser stays signed in for 30 days.</p>
+    <form method="post" class="login-form">
+      <label>
+        <span>Email</span>
+        <input type="email" name="email" value="{{ saved_email }}" required autocomplete="username">
+      </label>
+      <label>
+        <span>Password</span>
+        <input type="password" name="password" required autocomplete="current-password">
+      </label>
+      {% if error %}
+      <div class="error-box">{{ error }}</div>
+      {% endif %}
+      <button type="submit">Sign In</button>
+    </form>
+  </section>
+</main>
+{% endblock %}

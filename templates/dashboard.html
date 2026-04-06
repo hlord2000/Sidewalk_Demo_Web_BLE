@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Sidewalk Demo Console{% endblock %}
+{% block head %}
+<script>
+  window.DEMO_CONFIG = {{ page_config | tojson }};
+</script>
+<script defer src="{{ url_for('static', filename='app.js') }}"></script>
+{% endblock %}
+{% block body %}
+<main class="page-shell">
+  <header class="topbar">
+    <div class="hero-copy">
+      <p class="eyebrow">Nordic Semiconductor Demo</p>
+      <h1>Sidewalk Demo Console</h1>
+      <p class="muted">Cloud downlink, uplink monitor, and BLE shell in one page.</p>
+      <div class="hero-meta">
+        <span>Device <code>{{ page_config.deviceId }}</code></span>
+        <span>Topic <code>{{ page_config.uplinkTopic }}</code></span>
+      </div>
+    </div>
+    <form method="post" action="{{ url_for('logout') }}" class="topbar-actions">
+      <button class="ghost-button" type="submit">Sign Out</button>
+    </form>
+  </header>
+
+  <section class="grid">
+    <article class="panel panel-wide panel-log">
+      <div class="panel-head">
+        <h2>Uplink Monitor</h2>
+        <p class="muted">Server-side MQTT stream for button presses and firmware receipt events.</p>
+      </div>
+      <div class="monitor-meta">
+        <span id="event-feed-status" class="live-badge live-badge--connecting">Connecting</span>
+        <span>Device ID: <code>{{ page_config.deviceId }}</code></span>
+        <span>Topic: <code>{{ page_config.uplinkTopic }}</code></span>
+      </div>
+      <div id="event-log" class="event-log"></div>
+    </article>
+
+    <article class="panel panel-wide panel-console">
+      <div class="panel-head">
+        <h2>BLE Shell</h2>
+        <p class="muted">Connect from the phone browser over Web Bluetooth using Nordic UART Service.</p>
+        <p class="muted">The browser picker is filtered to devices advertising as <code>XIAO-WebShell*</code> with the NUS service.</p>
+      </div>
+      <div class="stack">
+        <div class="inline-actions console-actions">
+          <button id="ble-connect" type="button">Connect BLE Shell</button>
+          <button id="ble-disconnect" type="button" class="ghost-button">Disconnect</button>
+        </div>
+        <p id="ble-status" class="muted">Disconnected</p>
+        <div id="ble-terminal" class="terminal terminal-screen" aria-label="BLE shell output" role="log"></div>
+        <form id="ble-command-form" class="command-row">
+          <input
+            id="ble-command"
+            type="text"
+            placeholder="sid last_status"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="none"
+            inputmode="text"
+            enterkeyhint="send"
+            spellcheck="false">
+          <button type="submit">Send Command</button>
+        </form>
+      </div>
+    </article>
+
+    <article class="panel panel-wide panel-downlink">
+      <div class="panel-head">
+        <h2>Cloud Downlink</h2>
+        <p class="muted">Send application payloads to the registered Sidewalk endpoint.</p>
+      </div>
+      <form id="downlink-form" class="stack">
+        <label>
+          <span>Payload</span>
+          <textarea id="payload" rows="4" placeholder="Hello from the VPS"></textarea>
+        </label>
+        <div class="inline-fields">
+          <label>
+            <span>Message Type</span>
+            <select id="message-type">
+              <option value="CUSTOM_COMMAND_ID_NOTIFY">NOTIFY</option>
+              <option value="CUSTOM_COMMAND_ID_GET">GET</option>
+              <option value="CUSTOM_COMMAND_ID_SET">SET</option>
+            </select>
+          </label>
+          <label>
+            <span>Sequence</span>
+            <input id="seq" type="number" min="0" max="16383" placeholder="Auto">
+          </label>
+        </div>
+        <label class="checkbox-row">
+          <input id="acked" type="checkbox" checked>
+          <span>Use acknowledged mode</span>
+        </label>
+        <button type="submit">Send Downlink</button>
+      </form>
+      <pre id="downlink-status" class="status-box">Ready</pre>
+    </article>
+  </section>
+</main>
+{% endblock %}
