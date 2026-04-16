@@ -84,7 +84,7 @@
           <select id="device-selector">
             {% for device in page_config.devices %}
             <option value="{{ device.id }}" {% if device.id == page_config.selectedDeviceId %}selected{% endif %}>
-              {{ device.name }}{% if device.customerName %} · {{ device.customerName }}{% endif %}
+              {{ device.name }}
             </option>
             {% endfor %}
           </select>

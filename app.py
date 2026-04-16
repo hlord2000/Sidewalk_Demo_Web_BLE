@@ -89,8 +89,6 @@ def _device_summary(device: dict) -> dict:
         "wirelessDeviceId": device["wireless_device_id"],
         "uplinkTopic": device["uplink_topic"],
         "bleNamePrefix": device.get("ble_name_prefix") or "XIAO-WebShell",
-        "customerName": device.get("customer_summary") or "",
-        "customerEmail": ", ".join(device.get("customer_emails") or []),
     }
 
 
