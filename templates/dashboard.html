@@ -4,6 +4,7 @@
 <script>
   window.DEMO_CONFIG = {{ page_config | tojson }};
 </script>
+<script defer src="{{ url_for('static', filename='vendor/dap.umd.js') }}"></script>
 <script defer src="{{ url_for('static', filename='app.js') }}"></script>
 {% endblock %}
 {% block body %}
@@ -12,7 +13,7 @@
     <div class="hero-copy">
       <p class="eyebrow">Nordic Semiconductor Demo</p>
       <h1>Sidewalk Demo Console</h1>
-      <p class="muted">Cloud downlink, uplink monitor, and BLE shell in one page.</p>
+      <p class="muted">Cloud downlink, uplink monitor, BLE shell, and WebUSB firmware update in one page.</p>
       <div class="hero-meta">
         <span>Device <code>{{ page_config.deviceId }}</code></span>
         <span>Topic <code>{{ page_config.uplinkTopic }}</code></span>
@@ -63,6 +64,44 @@
             spellcheck="false">
           <button type="submit">Send Command</button>
         </form>
+      </div>
+    </article>
+
+    <article class="panel panel-wide panel-firmware">
+      <div class="panel-head">
+        <h2>Firmware Update</h2>
+        <p class="muted">Flash a local <code>.hex</code> or <code>.bin</code> image through a WebUSB CMSIS-DAP probe.</p>
+        <p class="muted">Use a Chromium browser on desktop. This browser flasher drives the nRF54L15 flash algorithm over generic CMSIS-DAP SWD access.</p>
+      </div>
+      <div class="stack">
+        <div class="inline-actions firmware-actions">
+          <button id="dap-connect" type="button">Connect Probe</button>
+          <button id="dap-disconnect" type="button" class="ghost-button">Disconnect</button>
+          <button id="dap-reset" type="button" class="ghost-button">Reset Target</button>
+        </div>
+        <div class="monitor-meta firmware-meta">
+          <span id="dap-status-badge" class="live-badge live-badge--idle">Disconnected</span>
+          <span>Probe <code id="dap-probe-name">No probe selected</code></span>
+          <span>Target <code id="dap-target-name">Unknown</code></span>
+        </div>
+        <form id="firmware-form" class="stack">
+          <label class="file-field">
+            <span>Firmware Image</span>
+            <input id="firmware-file" type="file" accept=".hex,.bin,application/octet-stream,text/plain">
+          </label>
+          <label>
+            <span>Binary Load Address</span>
+            <input id="firmware-address" type="text" value="0x00000000" placeholder="0x00000000">
+          </label>
+          <div class="firmware-progress-row">
+            <label class="firmware-progress">
+              <span>Flash Progress</span>
+              <progress id="firmware-progress" max="1" value="0"></progress>
+            </label>
+            <button id="firmware-flash" type="submit">Flash Firmware</button>
+          </div>
+        </form>
+        <pre id="firmware-status" class="status-box">Connect a WebUSB CMSIS-DAP probe to start.</pre>
       </div>
     </article>
 

@@ -16,8 +16,8 @@
   --terminal-cursor-bg: #7ce3fb;
   --terminal-cursor-ink: #071117;
   --shadow: 0 20px 48px rgba(8, 27, 43, 0.12);
-  --radius: 18px;
-  --radius-small: 12px;
+  --radius: 8px;
+  --radius-small: 8px;
   --mono: "SFMono-Regular", "Liberation Mono", monospace;
   --sans: "IBM Plex Sans", "Segoe UI", sans-serif;
 }
@@ -49,14 +49,19 @@ select {
 }
 
 button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 2.95rem;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-small);
   padding: 0.85rem 1.25rem;
   background: linear-gradient(180deg, var(--accent), var(--accent-strong));
   color: #fff;
   font-weight: 600;
-  letter-spacing: 0.01em;
+  line-height: 1.2;
+  text-align: center;
+  letter-spacing: 0;
   cursor: pointer;
   transition: transform 140ms ease, box-shadow 140ms ease, filter 140ms ease;
   box-shadow: 0 10px 24px rgba(0, 119, 163, 0.2);
@@ -71,11 +76,24 @@ button:active {
   transform: translateY(0);
 }
 
+button:disabled {
+  cursor: not-allowed;
+  filter: saturate(0.7);
+  opacity: 0.7;
+  transform: none;
+}
+
 .ghost-button {
   background: rgba(255, 255, 255, 0.08);
   color: inherit;
   border: 1px solid rgba(255, 255, 255, 0.2);
   box-shadow: none;
+}
+
+.panel .ghost-button {
+  background: #fff;
+  color: var(--ink);
+  border-color: var(--line);
 }
 
 .page-shell,
@@ -130,7 +148,8 @@ button:active {
 .panel-head h2,
 .login-card h1 {
   margin: 0 0 0.35rem;
-  letter-spacing: -0.03em;
+  line-height: 1.1;
+  letter-spacing: 0;
 }
 
 .hero-copy h1 {
@@ -147,8 +166,10 @@ button:active {
 
 .hero-meta span,
 .monitor-meta span {
+  display: inline-flex;
+  align-items: center;
   padding: 0.45rem 0.7rem;
-  border-radius: 999px;
+  border-radius: var(--radius-small);
   background: rgba(255, 255, 255, 0.08);
   color: inherit;
   font-size: 0.9rem;
@@ -159,7 +180,8 @@ button:active {
 .event-card code {
   font-family: var(--mono);
   font-size: 0.88em;
-  word-break: break-all;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .topbar-actions {
@@ -189,14 +211,23 @@ button:active {
 }
 
 .panel-head {
+  display: grid;
+  gap: 0.35rem;
   margin-bottom: 1rem;
+}
+
+.panel-head h2,
+.panel-head p,
+.login-card > .muted,
+p.muted {
+  margin: 0;
 }
 
 .eyebrow {
   margin: 0 0 0.5rem;
   color: var(--accent);
   text-transform: uppercase;
-  letter-spacing: 0.16em;
+  letter-spacing: 0;
   font-size: 0.72rem;
   font-weight: 700;
 }
@@ -227,9 +258,16 @@ button:active {
   gap: 0.75rem;
 }
 
+.inline-actions button {
+  width: 100%;
+}
+
 .console-actions {
-  grid-template-columns: repeat(2, minmax(10rem, max-content));
-  justify-content: start;
+  grid-template-columns: repeat(2, minmax(0, 12rem));
+}
+
+.firmware-actions {
+  grid-template-columns: repeat(3, minmax(0, 12rem));
 }
 
 .command-row {
@@ -263,10 +301,14 @@ select {
   width: 100%;
   min-width: 0;
   padding: 0.9rem 1rem;
-  border-radius: 14px;
+  border-radius: var(--radius-small);
   border: 1px solid var(--line);
   background: #fff;
   color: var(--ink);
+}
+
+input[type="file"] {
+  padding: 0.72rem 0.8rem;
 }
 
 input:focus,
@@ -295,6 +337,7 @@ textarea {
 .status-box,
 .terminal,
 .event-log {
+  margin: 0;
   border-radius: var(--radius-small);
   border: 1px solid var(--line);
 }
@@ -309,6 +352,9 @@ textarea {
   min-height: 6rem;
   padding: 0.95rem;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow-x: auto;
   background: var(--panel-soft);
   font-family: var(--mono);
 }
@@ -323,6 +369,8 @@ textarea {
     radial-gradient(circle at top right, rgba(0, 169, 206, 0.14), transparent 14rem),
     linear-gradient(180deg, #08131e 0%, var(--terminal-bg) 100%);
   color: var(--terminal-ink);
+  font-family: var(--mono);
+  font-size: 0.95rem;
   white-space: normal;
   line-height: 1.45;
 }
@@ -370,7 +418,7 @@ textarea {
 
 .event-card {
   padding: 0.85rem;
-  border-radius: 12px;
+  border-radius: var(--radius-small);
   border: 1px solid rgba(16, 38, 58, 0.08);
   background: linear-gradient(180deg, #ffffff, #f5fafe);
   transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
@@ -388,11 +436,11 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  border-radius: 999px;
+  border-radius: var(--radius-small);
   padding: 0.38rem 0.7rem;
   font-size: 0.78rem;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
 }
 
 .live-badge::before {
@@ -413,9 +461,47 @@ textarea {
   background: var(--accent-soft);
 }
 
+.live-badge--idle {
+  color: var(--muted);
+  background: rgba(94, 116, 134, 0.12);
+}
+
 .live-badge--error {
   color: var(--warn);
   background: rgba(181, 71, 50, 0.12);
+}
+
+.firmware-progress-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.firmware-progress {
+  gap: 0.5rem;
+}
+
+progress {
+  width: 100%;
+  height: 0.8rem;
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #e6eef3;
+}
+
+progress::-webkit-progress-bar {
+  background: #e6eef3;
+}
+
+progress::-webkit-progress-value {
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+}
+
+progress::-moz-progress-bar {
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
 }
 
 @media (max-width: 1100px) {
@@ -466,6 +552,10 @@ textarea {
 
   .console-actions {
     justify-content: stretch;
+  }
+
+  .firmware-progress-row {
+    grid-template-columns: 1fr;
   }
 
   .terminal {

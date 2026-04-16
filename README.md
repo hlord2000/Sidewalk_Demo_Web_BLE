@@ -11,6 +11,7 @@ Flask web app for a Sidewalk device demo:
 - Sidewalk cloud downlink sends via AWS IoT Wireless
 - live uplink monitoring via AWS IoT MQTT over SSE
 - Web Bluetooth shell over Nordic UART Service
+- WebUSB firmware flashing through CMSIS-DAP probes
 
 ## Repo Layout
 
@@ -62,6 +63,22 @@ Usually keep these too:
 - `MQTT_CLIENT_ID=sidewalk-web-demo`
 
 The NUS UUIDs already default to Nordic UART Service and usually do not need changes.
+
+## Firmware Update Over WebUSB
+
+The dashboard now includes a browser-side firmware update panel. It uses the vendored
+`dapjs@2.3.0` UMD build in `static/vendor/dap.umd.js` and talks directly to a
+WebUSB probe from the page.
+
+Current behavior:
+
+- Requires a Chromium-based desktop browser with WebUSB enabled.
+- Uses generic CMSIS-DAP memory access plus the nRF54L15 flash algorithm lifted from `pyOCD`.
+- Targets Nordic nRF54L15 application flash and UICR over WebUSB CMSIS-DAP.
+- Accepts local `.hex` and `.bin` images. Raw binaries use the `Binary Load Address` field.
+- Transfers happen directly from the browser to the probe; the Flask backend is not in
+  the firmware data path.
+- UICR writes are only attempted when the requested word can be programmed without an erase.
 
 ## Git Repo
 
