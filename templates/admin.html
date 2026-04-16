@@ -1,0 +1,289 @@
+{% extends "base.html" %}
+{% block title %}Admin | Sidewalk Demo{% endblock %}
+{% block body %}
+<main class="page-shell">
+  <header class="topbar">
+    <div class="topbar-head">
+      <a class="brand-home" href="https://www.nordicsemi.com/" target="_blank" rel="noreferrer">
+        <span class="brand-mark">
+          <img src="{{ url_for('static', filename='assets/nordic-logo.svg', v='20260406nordic') }}" alt="Nordic Semiconductor">
+        </span>
+        <span>
+          <span class="eyebrow">Nordic Semiconductor</span>
+          <strong class="brand-title">Admin Control Plane</strong>
+        </span>
+      </a>
+      <div class="topbar-actions topbar-actions--stack">
+        <a class="ghost-button ghost-button--link" href="{{ url_for('dashboard') }}">Dashboard</a>
+        <form method="post" action="{{ url_for('logout') }}">
+          <button class="ghost-button" type="submit">Sign Out</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow">Administrative tools</p>
+        <h1>Manage accounts, device inventory, and provisioning files.</h1>
+        <p class="muted">Create customer access, register Sidewalk devices in AWS, and download the artifacts needed for Nordic-side manufacturing and onboarding.</p>
+        <div class="hero-meta">
+          <span>Admin <code>{{ user.email }}</code></span>
+          <span>Customers <code>{{ customers|length }}</code></span>
+          <span>Devices <code>{{ devices|length }}</code></span>
+        </div>
+      </div>
+
+      <div class="hero-stats">
+        <div class="metric-card">
+          <span class="metric-label">Customer Accounts</span>
+          <strong class="metric-value">{{ customers|length }}</strong>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Tracked Devices</span>
+          <strong class="metric-value">{{ devices|length }}</strong>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Provisioning</span>
+          <strong class="metric-value">AWS + Nordic</strong>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section class="flash-stack">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+        <div class="flash-box flash-box--{{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+  </section>
+
+  <section class="grid grid-admin">
+    <article class="panel">
+      <div class="panel-head">
+        <p class="eyebrow">Accounts</p>
+        <h2>Create Customer</h2>
+        <p class="muted">Customer logins are stored locally and can only access their assigned devices.</p>
+      </div>
+      <form method="post" action="{{ url_for('create_customer') }}" class="stack">
+        <label>
+          <span>Customer Name</span>
+          <input type="text" name="display_name" placeholder="Pilot Account">
+        </label>
+        <label>
+          <span>Email</span>
+          <input type="email" name="email" required>
+        </label>
+        <label>
+          <span>Password</span>
+          <input type="text" name="password" required autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
+        </label>
+        <label>
+          <span>Notes</span>
+          <textarea name="notes" rows="3" placeholder="Project, site, or account notes"></textarea>
+        </label>
+        <button type="submit">Create Customer</button>
+      </form>
+    </article>
+
+    <article class="panel">
+      <div class="panel-head">
+        <p class="eyebrow">Provisioning</p>
+        <h2>Create AWS Sidewalk Device</h2>
+        <p class="muted">Creates the cloud-side wireless device, tracks it locally, and stores provisioning JSON for download.</p>
+      </div>
+      <form method="post" action="{{ url_for('create_device') }}" class="stack">
+        <label>
+          <span>Assign Customer</span>
+          <select name="customer_user_id">
+            <option value="">Unassigned</option>
+            {% for customer in customers %}
+            <option value="{{ customer.id }}">{{ customer.display_name or customer.email }} · {{ customer.email }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          <span>Device Name</span>
+          <input type="text" name="name" placeholder="Water Heater 01" required>
+        </label>
+        <label>
+          <span>Description</span>
+          <textarea name="description" rows="3" placeholder="Kitchen pilot unit"></textarea>
+        </label>
+        <label>
+          <span>Destination Name</span>
+          <input type="text" name="destination_name" value="{{ default_destination_name }}" required>
+        </label>
+        <label>
+          <span>Uplink MQTT Topic</span>
+          <input type="text" name="uplink_topic" value="{{ default_uplink_topic }}" required>
+        </label>
+        <label>
+          <span>Device Profile ID</span>
+          <input type="text" name="device_profile_id" value="{{ default_device_profile_id }}" required>
+        </label>
+        <label>
+          <span>BLE Name Prefix</span>
+          <input type="text" name="ble_name_prefix" value="XIAO-WebShell">
+        </label>
+        <button type="submit">Create Sidewalk Device</button>
+      </form>
+    </article>
+
+    <article class="panel panel-wide">
+      <div class="panel-head">
+        <p class="eyebrow">Inventory</p>
+        <h2>Import Existing Device</h2>
+        <p class="muted">Use this for devices that already exist in AWS IoT Core for Amazon Sidewalk.</p>
+      </div>
+      <form method="post" action="{{ url_for('import_device') }}" class="stack">
+        <div class="inline-fields inline-fields--triple">
+          <label>
+            <span>Assign Customer</span>
+            <select name="customer_user_id">
+              <option value="">Unassigned</option>
+              {% for customer in customers %}
+              <option value="{{ customer.id }}">{{ customer.display_name or customer.email }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>Device Name</span>
+            <input type="text" name="name" required>
+          </label>
+          <label>
+            <span>Wireless Device ID</span>
+            <input type="text" name="wireless_device_id" required>
+          </label>
+        </div>
+        <div class="inline-fields inline-fields--triple">
+          <label>
+            <span>Destination Name</span>
+            <input type="text" name="destination_name" value="{{ default_destination_name }}">
+          </label>
+          <label>
+            <span>Uplink MQTT Topic</span>
+            <input type="text" name="uplink_topic" value="{{ default_uplink_topic }}">
+          </label>
+          <label>
+            <span>Device Profile ID</span>
+            <input type="text" name="device_profile_id" value="{{ default_device_profile_id }}">
+          </label>
+        </div>
+        <div class="inline-fields">
+          <label>
+            <span>BLE Name Prefix</span>
+            <input type="text" name="ble_name_prefix" value="XIAO-WebShell">
+          </label>
+          <label>
+            <span>Description</span>
+            <textarea name="description" rows="3" placeholder="Optional import notes"></textarea>
+          </label>
+        </div>
+        <button type="submit">Import Device</button>
+      </form>
+    </article>
+
+    <article class="panel panel-wide">
+      <div class="panel-head">
+        <p class="eyebrow">Accounts</p>
+        <h2>Customers</h2>
+        <p class="muted">Track customer credentials and which devices are assigned to them.</p>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Devices</th>
+              <th>Created</th>
+              <th>Last Login</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for customer in customers %}
+            <tr>
+              <td>{{ customer.display_name or customer.email }}</td>
+              <td><code>{{ customer.email }}</code></td>
+              <td>{{ customer.device_count }}</td>
+              <td>{{ customer.created_at }}</td>
+              <td>{{ customer.last_login_at or "Never" }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5">No customers yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="panel panel-wide">
+      <div class="panel-head">
+        <p class="eyebrow">Inventory</p>
+        <h2>Tracked Devices</h2>
+        <p class="muted">Download provisioning files for Nordic manufacturing or assign devices to customer accounts.</p>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Customer</th>
+              <th>Wireless Device ID</th>
+              <th>Topic</th>
+              <th>Profile</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for device in devices %}
+            <tr>
+              <td>{{ device.name }}</td>
+              <td>
+                <form method="post" action="{{ url_for('update_device_assignment', device_id=device.id) }}" class="assignment-form">
+                  <select name="customer_user_id" aria-label="Assigned customer for {{ device.name }}">
+                    <option value="" {% if not device.customer_user_id %}selected{% endif %}>Unassigned</option>
+                    {% for customer in customers %}
+                    <option value="{{ customer.id }}" {% if customer.id == device.customer_user_id %}selected{% endif %}>
+                      {{ customer.display_name or customer.email }}
+                    </option>
+                    {% endfor %}
+                  </select>
+                  <button type="submit" class="ghost-button">Save</button>
+                </form>
+                {% if device.customer_email %}
+                <div class="table-hint"><code>{{ device.customer_email }}</code></div>
+                {% endif %}
+              </td>
+              <td><code>{{ device.wireless_device_id }}</code></td>
+              <td><code>{{ device.uplink_topic or "-" }}</code></td>
+              <td><code>{{ device.device_profile_id or "-" }}</code></td>
+              <td>
+                <div class="table-actions">
+                  <form method="post" action="{{ url_for('refresh_device', device_id=device.id) }}">
+                    <button type="submit">Refresh</button>
+                  </form>
+                  <a class="link-button" href="{{ url_for('download_certificate_json', device_id=device.id) }}">certificate.json</a>
+                  <a class="link-button" href="{{ url_for('download_wireless_device_json', device_id=device.id) }}">wireless_device.json</a>
+                  <a class="link-button" href="{{ url_for('download_device_profile_json', device_id=device.id) }}">device_profile.json</a>
+                </div>
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6">No devices tracked yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+
+  <footer class="nordic-footer">
+    <span>Nordic Semiconductor demo environment</span>
+    <span>Administrative inventory and provisioning</span>
+  </footer>
+</main>
+{% endblock %}

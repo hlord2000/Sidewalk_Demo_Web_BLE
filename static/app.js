@@ -7,6 +7,10 @@ const messageTypeInput = document.getElementById("message-type");
 const seqInput = document.getElementById("seq");
 const downlinkStatus = document.getElementById("downlink-status");
 const eventLog = document.getElementById("event-log");
+const deviceSelector = document.getElementById("device-selector");
+const selectedDeviceChip = document.getElementById("selected-device-chip");
+const selectedTopicChip = document.getElementById("selected-topic-chip");
+const bleNamePrefixLabel = document.getElementById("ble-name-prefix");
 
 const bleStatus = document.getElementById("ble-status");
 const bleTerminal = document.getElementById("ble-terminal");
@@ -18,6 +22,9 @@ const eventFeedStatus = document.getElementById("event-feed-status");
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder("utf-8");
+const devices = config.devices || [];
+const deviceMap = new Map(devices.map((device) => [String(device.id), device]));
+const deviceByWirelessId = new Map(devices.map((device) => [device.wirelessDeviceId, device]));
 
 const ANSI_COLORS = [
   "#0f172a",
@@ -447,6 +454,36 @@ let eventReconnectTimer = null;
 let eventReconnectDelay = 1000;
 const bleTerminalRenderer = new TerminalRenderer(bleTerminal);
 
+function currentDevice() {
+  if (!deviceSelector) {
+    return deviceMap.get(String(config.selectedDeviceId || "")) || null;
+  }
+  return deviceMap.get(deviceSelector.value) || null;
+}
+
+function updateSelectedDeviceUi() {
+  const device = currentDevice();
+  const namePrefix = (device && device.bleNamePrefix) || config.webShellNamePrefix || "XIAO-WebShell";
+
+  if (selectedDeviceChip) {
+    selectedDeviceChip.innerHTML = device
+      ? `Device ID: <code>${device.wirelessDeviceId}</code>`
+      : "No assigned device";
+  }
+
+  if (selectedTopicChip) {
+    selectedTopicChip.innerHTML = device && device.uplinkTopic
+      ? `Topic: <code>${device.uplinkTopic}</code>`
+      : "No uplink topic configured";
+  }
+
+  if (bleNamePrefixLabel) {
+    bleNamePrefixLabel.textContent = namePrefix;
+  }
+
+  config.webShellNamePrefix = namePrefix;
+}
+
 function appendTerminal(text) {
   bleTerminalRenderer.feed(text);
 }
@@ -471,6 +508,13 @@ function renderEvent(event) {
 
   const lines = [];
   lines.push(`${event.ts || ""} ${event.type}`);
+  const device = deviceByWirelessId.get(event.wireless_device_id || "");
+
+  if (event.device_name) {
+    lines.push(`Device: ${event.device_name}`);
+  } else if (device) {
+    lines.push(`Device: ${device.name}`);
+  }
 
   if (event.semantic === "button_press") {
     lines.push("Device event: button press");
@@ -518,7 +562,12 @@ function connectEventStream() {
   }
 
   setEventFeedStatus("Connecting", "connecting");
-  const source = new EventSource("/api/events");
+  const params = new URLSearchParams();
+  const device = currentDevice();
+  if (device) {
+    params.set("device", device.id);
+  }
+  const source = new EventSource(`/api/events?${params.toString()}`);
   eventSource = source;
 
   source.onopen = () => {
@@ -549,12 +598,14 @@ function connectEventStream() {
 }
 
 async function sendDownlink(payload, acked, messageType, seq) {
+  const device = currentDevice();
   const response = await fetch("/api/downlink", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
+      deviceId: device ? device.id : null,
       payload,
       acked,
       messageType,
@@ -570,7 +621,8 @@ async function connectBleShell() {
     return;
   }
 
-  const namePrefix = config.webShellNamePrefix || "XIAO-WebShell";
+  const device = currentDevice();
+  const namePrefix = (device && device.bleNamePrefix) || config.webShellNamePrefix || "XIAO-WebShell";
   setBleStatus(`Scanning for ${namePrefix}...`);
   bleDevice = await navigator.bluetooth.requestDevice({
     filters: [
@@ -620,43 +672,59 @@ async function sendBleCommand(command) {
   await bleRxCharacteristic.writeValue(bytes);
 }
 
-downlinkForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  downlinkStatus.textContent = "Sending...";
-  const result = await sendDownlink(
-    payloadInput.value,
-    ackedInput.checked,
-    messageTypeInput.value,
-    seqInput.value || null,
-  );
-  downlinkStatus.textContent = JSON.stringify(result, null, 2);
-});
+if (downlinkForm) {
+  downlinkForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    downlinkStatus.textContent = "Sending...";
+    const result = await sendDownlink(
+      payloadInput.value,
+      ackedInput.checked,
+      messageTypeInput.value,
+      seqInput.value || null,
+    );
+    downlinkStatus.textContent = JSON.stringify(result, null, 2);
+  });
+}
 
-bleConnectButton.addEventListener("click", async () => {
-  try {
-    await connectBleShell();
-  } catch (error) {
-    setBleStatus(`BLE error: ${error.message}`);
-  }
-});
+if (bleConnectButton) {
+  bleConnectButton.addEventListener("click", async () => {
+    try {
+      await connectBleShell();
+    } catch (error) {
+      setBleStatus(`BLE error: ${error.message}`);
+    }
+  });
+}
 
-bleDisconnectButton.addEventListener("click", async () => {
-  await disconnectBleShell();
-});
+if (bleDisconnectButton) {
+  bleDisconnectButton.addEventListener("click", async () => {
+    await disconnectBleShell();
+  });
+}
 
-bleCommandForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const command = bleCommandInput.value.trim();
-  if (!command) {
-    return;
-  }
-  appendTerminal(`\n> ${command}\n`);
-  try {
-    await sendBleCommand(command);
-    bleCommandInput.value = "";
-  } catch (error) {
-    appendTerminal(`[error] ${error.message}\n`);
-  }
-});
+if (bleCommandForm) {
+  bleCommandForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const command = bleCommandInput.value.trim();
+    if (!command) {
+      return;
+    }
+    appendTerminal(`\n> ${command}\n`);
+    try {
+      await sendBleCommand(command);
+      bleCommandInput.value = "";
+    } catch (error) {
+      appendTerminal(`[error] ${error.message}\n`);
+    }
+  });
+}
 
+if (deviceSelector) {
+  deviceSelector.addEventListener("change", () => {
+    updateSelectedDeviceUi();
+    connectEventStream();
+  });
+}
+
+updateSelectedDeviceUi();
 connectEventStream();

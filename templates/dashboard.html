@@ -4,44 +4,118 @@
 <script>
   window.DEMO_CONFIG = {{ page_config | tojson }};
 </script>
-<script defer src="{{ url_for('static', filename='app.js') }}"></script>
+<script defer src="{{ url_for('static', filename='app.js', v='20260406nordic') }}"></script>
 {% endblock %}
 {% block body %}
 <main class="page-shell">
   <header class="topbar">
-    <div class="hero-copy">
-      <p class="eyebrow">Nordic Semiconductor Demo</p>
-      <h1>Sidewalk Demo Console</h1>
-      <p class="muted">Cloud downlink, uplink monitor, and BLE shell in one page.</p>
-      <div class="hero-meta">
-        <span>Device <code>{{ page_config.deviceId }}</code></span>
-        <span>Topic <code>{{ page_config.uplinkTopic }}</code></span>
+    <div class="topbar-head">
+      <a class="brand-home" href="https://www.nordicsemi.com/" target="_blank" rel="noreferrer">
+        <span class="brand-mark">
+          <img src="{{ url_for('static', filename='assets/nordic-logo.svg', v='20260406nordic') }}" alt="Nordic Semiconductor">
+        </span>
+        <span>
+          <span class="eyebrow">Nordic Semiconductor</span>
+          <strong class="brand-title">Sidewalk Device Console</strong>
+        </span>
+      </a>
+      <div class="topbar-actions topbar-actions--stack">
+        {% if page_config.adminUrl %}
+        <a class="ghost-button ghost-button--link" href="{{ page_config.adminUrl }}">Admin</a>
+        {% endif %}
+        <form method="post" action="{{ url_for('logout') }}">
+          <button class="ghost-button" type="submit">Sign Out</button>
+        </form>
       </div>
     </div>
-    <form method="post" action="{{ url_for('logout') }}" class="topbar-actions">
-      <button class="ghost-button" type="submit">Sign Out</button>
-    </form>
+
+    <div class="hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow">Connected operations</p>
+        <h1>Multi-device cloud control with live Web BLE access.</h1>
+        <p class="muted">Monitor uplinks, send downlinks, and attach to the Nordic UART shell from a single mobile-friendly control surface.</p>
+        <div class="hero-meta">
+          <span>User <code>{{ page_config.user.email }}</code></span>
+          <span>Role <code>{{ page_config.user.role }}</code></span>
+          {% if page_config.selectedWirelessDeviceId %}
+          <span>Device <code>{{ page_config.selectedWirelessDeviceId }}</code></span>
+          {% endif %}
+          {% if page_config.selectedUplinkTopic %}
+          <span>Topic <code>{{ page_config.selectedUplinkTopic }}</code></span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="hero-stats">
+        <div class="metric-card">
+          <span class="metric-label">Tracked Devices</span>
+          <strong class="metric-value">{{ page_config.devices|length }}</strong>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">BLE Shell</span>
+          <strong class="metric-value">{{ page_config.webShellNamePrefix }}*</strong>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">AWS Route</span>
+          <strong class="metric-value">{% if page_config.selectedUplinkTopic %}MQTT{% else %}Pending{% endif %}</strong>
+        </div>
+      </div>
+    </div>
   </header>
+
+  <section class="section-intro">
+    <div>
+      <p class="eyebrow">Operations</p>
+      <h2>Active device workspace</h2>
+    </div>
+    <p class="muted">The layout follows the live device workflow: uplink log first, then shell, then cloud downlink.</p>
+  </section>
 
   <section class="grid">
     <article class="panel panel-wide panel-log">
       <div class="panel-head">
+        <p class="eyebrow">Server stream</p>
         <h2>Uplink Monitor</h2>
-        <p class="muted">Server-side MQTT stream for button presses and firmware receipt events.</p>
+        <p class="muted">Server-side MQTT stream filtered to the selected device.</p>
       </div>
-      <div class="monitor-meta">
-        <span id="event-feed-status" class="live-badge live-badge--connecting">Connecting</span>
-        <span>Device ID: <code>{{ page_config.deviceId }}</code></span>
-        <span>Topic: <code>{{ page_config.uplinkTopic }}</code></span>
+      <div class="stack">
+        <label>
+          <span>Tracked Device</span>
+          <select id="device-selector">
+            {% for device in page_config.devices %}
+            <option value="{{ device.id }}" {% if device.id == page_config.selectedDeviceId %}selected{% endif %}>
+              {{ device.name }}{% if device.customerName %} · {{ device.customerName }}{% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="monitor-meta">
+          <span id="event-feed-status" class="live-badge live-badge--connecting">Connecting</span>
+          <span id="selected-device-chip">
+            {% if page_config.selectedWirelessDeviceId %}
+            Device ID: <code>{{ page_config.selectedWirelessDeviceId }}</code>
+            {% else %}
+            No assigned device
+            {% endif %}
+          </span>
+          <span id="selected-topic-chip">
+            {% if page_config.selectedUplinkTopic %}
+            Topic: <code>{{ page_config.selectedUplinkTopic }}</code>
+            {% else %}
+            No uplink topic configured
+            {% endif %}
+          </span>
+        </div>
       </div>
       <div id="event-log" class="event-log"></div>
     </article>
 
     <article class="panel panel-wide panel-console">
       <div class="panel-head">
+        <p class="eyebrow">Browser shell</p>
         <h2>BLE Shell</h2>
         <p class="muted">Connect from the phone browser over Web Bluetooth using Nordic UART Service.</p>
-        <p class="muted">The browser picker is filtered to devices advertising as <code>XIAO-WebShell*</code> with the NUS service.</p>
+        <p class="muted">The browser picker is filtered to devices advertising as <code id="ble-name-prefix">{{ page_config.webShellNamePrefix }}</code>* with the NUS service.</p>
       </div>
       <div class="stack">
         <div class="inline-actions console-actions">
@@ -68,13 +142,17 @@
 
     <article class="panel panel-wide panel-downlink">
       <div class="panel-head">
+        <p class="eyebrow">Cloud to device</p>
         <h2>Cloud Downlink</h2>
-        <p class="muted">Send application payloads to the registered Sidewalk endpoint.</p>
+        <p class="muted">Send application payloads to the currently selected Sidewalk endpoint.</p>
       </div>
+      {% if not page_config.selectedDeviceId %}
+      <pre id="downlink-status" class="status-box">No device is assigned to this account yet.</pre>
+      {% else %}
       <form id="downlink-form" class="stack">
         <label>
           <span>Payload</span>
-          <textarea id="payload" rows="4" placeholder="Hello from the VPS"></textarea>
+          <textarea id="payload" rows="4" placeholder="Hello from the control plane"></textarea>
         </label>
         <div class="inline-fields">
           <label>
@@ -97,7 +175,13 @@
         <button type="submit">Send Downlink</button>
       </form>
       <pre id="downlink-status" class="status-box">Ready</pre>
+      {% endif %}
     </article>
   </section>
+
+  <footer class="nordic-footer">
+    <span>Nordic Semiconductor demo environment</span>
+    <span>Sidewalk + Web BLE control plane</span>
+  </footer>
 </main>
 {% endblock %}

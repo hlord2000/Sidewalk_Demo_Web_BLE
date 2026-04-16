@@ -1,10 +1,5 @@
 # Sidewalk Web Demo
 
-# For info on firmware: https://github.com/hlord2000/ncs-sidewalk-demo-application
-
-## NOTE: use [https://apps.apple.com/us/app/bluefy-web-ble-browser/id1492822055](Bluefy) on iOS to properly access
-
-
 Flask web app for a Sidewalk device demo:
 
 - login-gated dashboard
@@ -24,7 +19,7 @@ Flask web app for a Sidewalk device demo:
 ## Local Run
 
 ```sh
-cd /opt/ncs/sdks/ncs-sdk-sidewalk/sdk-sidewalk/tools/web_demo
+cd tools/web_demo
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -65,10 +60,11 @@ The NUS UUIDs already default to Nordic UART Service and usually do not need cha
 
 ## Git Repo
 
-This folder is intended to be its own deployable repo root.
+This folder can still be deployed as its own repo root if you want to split the
+web service out later.
 
 ```sh
-cd /opt/ncs/sdks/ncs-sdk-sidewalk/sdk-sidewalk/tools/web_demo
+cd tools/web_demo
 git init -b main
 git add .
 git commit -m "Prepare Sidewalk web demo for Railway"
@@ -102,3 +98,34 @@ Deploy flow:
 6. Open the Railway-generated domain over `https://`.
 
 Web Bluetooth requires a secure context, so Railway's HTTPS domain is suitable.
+
+## Security Notes
+
+Do not commit real AWS keys or login passwords into the repo.
+
+This app already has an internal login page. For stronger public exposure controls, put a second access layer in front of Railway, for example Cloudflare Access or a similar identity proxy. The app login is still useful even with that in place.
+
+## Firmware Build
+
+The paired firmware expects:
+
+- button trigger on `P1.04`
+- LED feedback on `P2.00`
+- BLE shell over Nordic UART Service
+
+Build the XIAO variant with:
+
+```sh
+west build -p always -b xiao_nrf54l15/nrf54l15/cpuapp app \
+  -d build/xiao-web-demo \
+  -- \
+  -DFILE_SUFFIX=release \
+  -DOVERLAY_CONFIG='overlay-min-size.conf;overlay-prop-radio.conf;overlay-web-demo.conf' \
+  -DDTC_OVERLAY_FILE='boards/xiao_nrf54l15_nrf54l15_cpuapp.overlay;overlay-web-demo.overlay'
+```
+
+The generated image is:
+
+```text
+build/xiao-web-demo/merged.hex
+```

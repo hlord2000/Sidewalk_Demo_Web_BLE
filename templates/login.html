@@ -2,24 +2,54 @@
 {% block title %}Sign In{% endblock %}
 {% block body %}
 <main class="login-shell">
-  <section class="login-card">
-    <p class="eyebrow">Nordic Demo Access</p>
-    <h1>Sidewalk Control</h1>
-    <p class="muted">Authenticated access for cloud messaging and BLE shell control. This browser stays signed in for 30 days.</p>
-    <form method="post" class="login-form">
-      <label>
-        <span>Email</span>
-        <input type="email" name="email" value="{{ saved_email }}" required autocomplete="username">
-      </label>
-      <label>
-        <span>Password</span>
-        <input type="password" name="password" required autocomplete="current-password">
-      </label>
-      {% if error %}
-      <div class="error-box">{{ error }}</div>
-      {% endif %}
-      <button type="submit">Sign In</button>
-    </form>
+  <section class="login-stage">
+    <aside class="login-brand">
+      <a class="brand-home brand-home--light" href="https://www.nordicsemi.com/" target="_blank" rel="noreferrer">
+        <span class="brand-mark">
+          <img src="{{ url_for('static', filename='assets/nordic-logo.svg', v='20260406nordic') }}" alt="Nordic Semiconductor">
+        </span>
+        <span>
+          <span class="eyebrow">Nordic Semiconductor</span>
+          <strong class="brand-title">Sidewalk Demo</strong>
+        </span>
+      </a>
+      <h1>Secure field access for Sidewalk and Web BLE.</h1>
+      <p class="brand-lead">Use the same control plane to monitor uplinks, send cloud downlinks, and open a live BLE shell from the phone browser.</p>
+      <div class="brand-highlights">
+        <div class="highlight-card">
+          <span class="highlight-label">Cloud</span>
+          <strong>AWS IoT Wireless routing</strong>
+        </div>
+        <div class="highlight-card">
+          <span class="highlight-label">Browser</span>
+          <strong>Nordic UART over Web Bluetooth</strong>
+        </div>
+        <div class="highlight-card">
+          <span class="highlight-label">Demo</span>
+          <strong>Provision, monitor, and control devices</strong>
+        </div>
+      </div>
+    </aside>
+
+    <section class="login-card">
+      <p class="eyebrow">Authenticated access</p>
+      <h2>Sign in</h2>
+      <p class="muted">This browser stays signed in for 30 days. Use the credentials assigned to your account.</p>
+      <form method="post" class="login-form">
+        <label>
+          <span>Email</span>
+          <input type="email" name="email" value="{{ saved_email }}" required autocomplete="username">
+        </label>
+        <label>
+          <span>Password</span>
+          <input type="password" name="password" required autocomplete="current-password">
+        </label>
+        {% if error %}
+        <div class="error-box">{{ error }}</div>
+        {% endif %}
+        <button type="submit">Sign In</button>
+      </form>
+    </section>
   </section>
 </main>
 {% endblock %}

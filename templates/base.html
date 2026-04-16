@@ -3,12 +3,12 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#0f2438">
+    <meta name="theme-color" content="#333f48">
     <title>{% block title %}Sidewalk Demo{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260406nordic') }}">
     {% block head %}{% endblock %}
   </head>
-  <body>
+  <body class="{% block body_class %}brand-body{% endblock %}">
     {% block body %}{% endblock %}
   </body>
 </html>
