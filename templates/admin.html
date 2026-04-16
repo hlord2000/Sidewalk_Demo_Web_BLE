@@ -244,18 +244,24 @@
               <td>{{ device.name }}</td>
               <td>
                 <form method="post" action="{{ url_for('update_device_assignment', device_id=device.id) }}" class="assignment-form">
-                  <select name="customer_user_id" aria-label="Assigned customer for {{ device.name }}">
-                    <option value="" {% if not device.customer_user_id %}selected{% endif %}>Unassigned</option>
+                  <div class="assignment-list" aria-label="Assigned customer accounts for {{ device.name }}">
                     {% for customer in customers %}
-                    <option value="{{ customer.id }}" {% if customer.id == device.customer_user_id %}selected{% endif %}>
-                      {{ customer.display_name or customer.email }}
-                    </option>
+                    <label class="assignment-option">
+                      <input type="checkbox" name="customer_user_ids" value="{{ customer.id }}" {% if customer.id in device.customer_ids %}checked{% endif %}>
+                      <span>{{ customer.display_name or customer.email }}</span>
+                    </label>
+                    {% else %}
+                    <div class="table-hint">No customer accounts yet.</div>
                     {% endfor %}
-                  </select>
+                  </div>
                   <button type="submit" class="ghost-button">Save</button>
                 </form>
-                {% if device.customer_email %}
-                <div class="table-hint"><code>{{ device.customer_email }}</code></div>
+                {% if device.customer_emails %}
+                <div class="table-hint">
+                  {% for email in device.customer_emails %}
+                  <code>{{ email }}</code>{% if not loop.last %}, {% endif %}
+                  {% endfor %}
+                </div>
                 {% endif %}
               </td>
               <td><code>{{ device.wireless_device_id }}</code></td>

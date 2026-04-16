@@ -823,7 +823,35 @@ select:focus {
   align-items: start;
 }
 
-.assignment-form select,
+.assignment-form button {
+  min-width: 0;
+}
+
+.assignment-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.assignment-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  min-width: 0;
+  color: var(--ink);
+}
+
+.assignment-option input {
+  width: auto;
+  margin: 0.18rem 0 0;
+}
+
+.assignment-option span {
+  min-width: 0;
+  font-size: 0.95rem;
+  font-weight: 400;
+  color: inherit;
+}
+
 .assignment-form button {
   min-width: 0;
 }

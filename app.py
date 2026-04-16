@@ -89,8 +89,8 @@ def _device_summary(device: dict) -> dict:
         "wirelessDeviceId": device["wireless_device_id"],
         "uplinkTopic": device["uplink_topic"],
         "bleNamePrefix": device.get("ble_name_prefix") or "XIAO-WebShell",
-        "customerName": device.get("customer_name") or "",
-        "customerEmail": device.get("customer_email") or "",
+        "customerName": device.get("customer_summary") or "",
+        "customerEmail": ", ".join(device.get("customer_emails") or []),
     }
 
 
@@ -390,37 +390,32 @@ def update_device_assignment(device_id: int):
         flash("Device not found.", "error")
         return redirect(url_for("admin"))
 
-    raw_customer_id = request.form.get("customer_user_id", "")
-    try:
-        customer_id = _customer_id_from_form(raw_customer_id)
-    except ValueError:
-        flash("Choose a valid customer before saving the assignment.", "error")
-        return redirect(url_for("admin"))
-
-    customer = None
-    if customer_id is not None:
+    customer_ids: list[int] = []
+    customer_names: list[str] = []
+    for raw_customer_id in request.form.getlist("customer_user_ids"):
+        try:
+            customer_id = _customer_id_from_form(raw_customer_id)
+        except ValueError:
+            flash("Choose valid customer accounts before saving access.", "error")
+            return redirect(url_for("admin"))
+        if customer_id is None:
+            continue
         customer = store.get_customer(customer_id)
         if customer is None:
-            flash("Choose a valid customer before saving the assignment.", "error")
+            flash("Choose valid customer accounts before saving access.", "error")
             return redirect(url_for("admin"))
+        customer_ids.append(customer_id)
+        customer_names.append(customer["display_name"] or customer["email"])
 
-    updated_device = store.update_device_customer(device_id, customer_id)
+    updated_device = store.set_device_customers(device_id, customer_ids)
     if updated_device is None:
         flash("Device not found.", "error")
         return redirect(url_for("admin"))
 
-    previous_customer_name = device.get("customer_name") or "Unassigned"
-    if customer is None:
-        flash(f"Removed the customer assignment from {updated_device['name']}.", "success")
-    elif device.get("customer_user_id") == customer["id"]:
-        flash(f"{updated_device['name']} is still assigned to {customer['display_name'] or customer['email']}.", "success")
-    elif device.get("customer_user_id") is None:
-        flash(f"Assigned {updated_device['name']} to {customer['display_name'] or customer['email']}.", "success")
+    if not customer_names:
+        flash(f"Removed all customer access from {updated_device['name']}.", "success")
     else:
-        flash(
-            f"Reassigned {updated_device['name']} from {previous_customer_name} to {customer['display_name'] or customer['email']}.",
-            "success",
-        )
+        flash(f"Updated access for {updated_device['name']}: {', '.join(customer_names)}.", "success")
     return redirect(url_for("admin"))
 
 
