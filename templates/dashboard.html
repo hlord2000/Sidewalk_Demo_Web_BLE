@@ -4,7 +4,7 @@
 <script>
   window.DEMO_CONFIG = {{ page_config | tojson }};
 </script>
-<script defer src="{{ url_for('static', filename='app.js', v='20260406nordic') }}"></script>
+<script defer src="{{ url_for('static', filename='app.js', v='20260423compactui') }}"></script>
 {% endblock %}
 {% block body %}
 <main class="page-shell">
@@ -33,7 +33,7 @@
       <div class="hero-copy">
         <p class="eyebrow">Connected operations</p>
         <h1>Multi-device cloud control with live Web BLE access.</h1>
-        <p class="muted">Monitor uplinks, send downlinks, and attach to the Nordic UART shell from a single mobile-friendly control surface.</p>
+        <p class="muted">Monitor uplinks, send downlinks, and drive the Nordic UART shell from one mobile-friendly control surface.</p>
         <div class="hero-meta">
           <span>User <code>{{ page_config.user.email }}</code></span>
           <span>Role <code>{{ page_config.user.role }}</code></span>
@@ -68,7 +68,7 @@
       <p class="eyebrow">Operations</p>
       <h2>Active device workspace</h2>
     </div>
-    <p class="muted">The layout follows the live device workflow: uplink log first, then shell, then cloud downlink.</p>
+    <p class="muted">The layout follows the live device workflow: uplink log first, then shell control, then cloud downlink.</p>
   </section>
 
   <section class="grid">
@@ -112,10 +112,7 @@
 
     <article class="panel panel-wide panel-console">
       <div class="panel-head">
-        <p class="eyebrow">Browser shell</p>
         <h2>BLE Shell</h2>
-        <p class="muted">Connect from the phone browser over Web Bluetooth using Nordic UART Service.</p>
-        <p class="muted">The browser picker is filtered to devices advertising as <code id="ble-name-prefix">{{ page_config.webShellNamePrefix }}</code>* with the NUS service.</p>
       </div>
       <div class="stack">
         <div class="inline-actions console-actions">
@@ -123,6 +120,81 @@
           <button id="ble-disconnect" type="button" class="ghost-button">Disconnect</button>
         </div>
         <p id="ble-status" class="muted">Disconnected</p>
+        <div class="stack">
+          <div>
+            <div class="inline-actions">
+              <button type="button" class="js-link-workflow" data-workflow="ble">sid flow send ble</button>
+              <button type="button" class="js-link-workflow" data-workflow="fsk">sid flow send fsk</button>
+              <button type="button" class="js-link-workflow" data-workflow="lora">sid flow send lora</button>
+            </div>
+            <div class="inline-actions">
+              <button type="button" class="js-shell-command ghost-button" data-command="sid flow connect">sid flow connect</button>
+              <button type="button" class="js-shell-command ghost-button" data-command="sid flow status">sid flow status</button>
+              <button type="button" class="js-shell-command ghost-button" data-command="sid flow cancel">sid flow cancel</button>
+              <button type="button" class="js-shell-command ghost-button" data-command="sid last_status">sid last_status</button>
+            </div>
+            <p id="ble-workflow-status" class="muted"></p>
+          </div>
+
+          <form id="ble-payload-form" class="stack">
+            <label>
+              <span>Payload</span>
+              <textarea
+                id="ble-payload"
+                rows="3"
+                placeholder="Hello from the Web BLE console"></textarea>
+            </label>
+            <div class="inline-fields inline-fields--triple">
+              <label>
+                <span>Link</span>
+                <select id="ble-send-link">
+                  <option value="1">BLE</option>
+                  <option value="2">FSK</option>
+                  <option value="3">LoRa</option>
+                  <option value="8" selected>Any</option>
+                </select>
+              </label>
+              <label>
+                <span>Route</span>
+                <select id="ble-link-mode">
+                  <option value="1">Cloud</option>
+                  <option value="2">Mobile</option>
+                </select>
+              </label>
+              <label>
+                <span>Type</span>
+                <select id="ble-message-type">
+                  <option value="2">Notify</option>
+                  <option value="0">Get</option>
+                  <option value="1">Set</option>
+                  <option value="3">Response</option>
+                </select>
+              </label>
+            </div>
+            <div class="inline-fields">
+              <label>
+                <span>Encoding</span>
+                <select id="ble-payload-encoding">
+                  <option value="text">UTF-8 Text</option>
+                  <option value="hex">Raw Hex</option>
+                </select>
+              </label>
+              <label>
+                <span>Preset</span>
+                <select id="ble-payload-preset">
+                  <option value="">Custom Payload</option>
+                  <option value="status">Request status</option>
+                  <option value="hello">Hello string</option>
+                  <option value="json">JSON sample</option>
+                </select>
+              </label>
+            </div>
+            <div class="inline-actions">
+              <button type="submit">Send Payload</button>
+              <button type="button" id="ble-copy-command" class="ghost-button">Copy Command to Shell</button>
+            </div>
+          </form>
+        </div>
         <div id="ble-terminal" class="terminal terminal-screen" aria-label="BLE shell output" role="log"></div>
         <form id="ble-command-form" class="command-row">
           <input
@@ -137,6 +209,16 @@
             spellcheck="false">
           <button type="submit">Send Command</button>
         </form>
+        <details class="console-secondary">
+          <summary>Advanced Shell</summary>
+          <p class="muted">Power off: hold D0 for about 2 seconds until the LED blinks, release, then press again to wake.</p>
+          <div class="inline-actions">
+            <button type="button" class="js-shell-command ghost-button" data-command="sid init 7">Init All Links</button>
+            <button type="button" class="js-shell-command ghost-button" data-command="sid start">Start</button>
+            <button type="button" class="js-shell-command ghost-button" data-command="sid stop">Stop</button>
+            <button type="button" class="js-shell-command ghost-button" data-command="sid deinit">Deinit</button>
+          </div>
+        </details>
       </div>
     </article>
 

@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#333f48">
+    <title>WebUSB CMSIS-DAP Smoke Test</title>
+    <link rel="stylesheet" href="/static/styles.css?v=20260416webusb">
+    <script defer src="/static/webusb-smoke.js?v=20260416webusb"></script>
+  </head>
+  <body class="brand-body">
+    <main class="page-shell">
+      <header class="topbar">
+        <div class="topbar-head">
+          <a class="brand-home" href="https://www.nordicsemi.com/" target="_blank" rel="noreferrer">
+            <span class="brand-mark">
+              <img src="/static/assets/nordic-logo.svg?v=20260416webusb" alt="Nordic Semiconductor">
+            </span>
+            <span>
+              <span class="eyebrow">Nordic Semiconductor</span>
+              <strong class="brand-title">WebUSB Probe Smoke Test</strong>
+            </span>
+          </a>
+          <div class="topbar-actions topbar-actions--stack">
+            <a class="ghost-button ghost-button--link" href="/login">Back to Sign In</a>
+          </div>
+        </div>
+
+        <div class="hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow">Local probe validation</p>
+            <h1>Request the CMSIS-DAP probe and exchange raw WebUSB transfers.</h1>
+            <p class="muted">This page verifies Chrome can open the Seeed XIAO nRF54 CMSIS-DAP v2 interface, read CMSIS-DAP metadata, and select SWD transport without leaving the probe claimed.</p>
+            <div class="hero-meta">
+              <span>Expected VID:PID <code>2886:0066</code></span>
+              <span>Protocol <code>CMSIS-DAP v2</code></span>
+              <span>Transport <code>WebUSB bulk</code></span>
+            </div>
+          </div>
+
+          <div class="hero-stats">
+            <div class="metric-card">
+              <span class="metric-label">Browser USB</span>
+              <strong id="usb-support-value" class="metric-value">Checking</strong>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label">Authorized Probes</span>
+              <strong id="authorized-count-value" class="metric-value">0</strong>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label">Last Result</span>
+              <strong id="last-result-value" class="metric-value">Idle</strong>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section class="section-intro">
+        <div>
+          <p class="eyebrow">Smoke test</p>
+          <h2>Probe session</h2>
+        </div>
+        <p class="muted">Use the request button for a real chooser flow. The automated test runner drives that chooser through Chrome DevTools Protocol.</p>
+      </section>
+
+      <section class="grid">
+        <article class="panel panel-wide">
+          <div class="panel-head">
+            <p class="eyebrow">Chooser flow</p>
+            <h2>WebUSB Request</h2>
+            <p class="muted">The test claims the CMSIS-DAP v2 bulk interface, reads probe metadata, issues <code>DAP_Connect(SWD)</code>, then releases the interface.</p>
+          </div>
+          <div class="stack">
+            <div class="inline-actions console-actions">
+              <button id="request-device" type="button">Run WebUSB Smoke Test</button>
+              <button id="use-authorized-device" type="button" class="ghost-button">Use Authorized Probe</button>
+              <button id="disconnect-device" type="button" class="ghost-button">Release Probe</button>
+            </div>
+            <div class="monitor-meta">
+              <span id="probe-status-badge" class="live-badge live-badge--connecting">Ready</span>
+              <span id="probe-device-chip">No probe selected</span>
+              <span id="probe-interface-chip">No interface claimed</span>
+              <span id="probe-packet-chip">Packet size: -</span>
+            </div>
+            <pre id="probe-summary" class="status-box">Idle</pre>
+          </div>
+        </article>
+
+        <article class="panel panel-wide">
+          <div class="panel-head">
+            <p class="eyebrow">Probe metadata</p>
+            <h2>CMSIS-DAP Info</h2>
+            <p class="muted">Values come from raw <code>DAP_Info</code> responses over the bulk endpoints.</p>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Field</th>
+                  <th scope="col">Value</th>
+                </tr>
+              </thead>
+              <tbody id="probe-info-body">
+                <tr>
+                  <td>State</td>
+                  <td>No probe data yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel panel-wide">
+          <div class="panel-head">
+            <p class="eyebrow">Transfer trace</p>
+            <h2>Log</h2>
+            <p class="muted">Each step is recorded so failures are obvious without opening DevTools.</p>
+          </div>
+          <div id="probe-log" class="event-log" role="log" aria-live="polite"></div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

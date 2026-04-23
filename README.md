@@ -37,6 +37,24 @@ python app.py
 
 The app listens on `0.0.0.0:${PORT:-8000}`.
 
+## WebUSB Smoke Test
+
+For local probe validation without signing in:
+
+```sh
+node scripts/webusb_smoke_cdp.js
+```
+
+This launches an isolated Chrome profile, opens the local `webusb-smoke.html`
+page from this repo, clicks the WebUSB request button, auto-selects the
+CMSIS-DAP chooser entry through Chrome DevTools Protocol, reads CMSIS-DAP
+metadata, and then releases the probe.
+
+If Chrome does not emit the DevTools chooser event on the first run, select the
+device once manually. The script keeps a local `.webusb-smoke-profile/`
+Chrome profile so later runs can reuse the granted WebUSB permission through
+the page's authorized-device path.
+
 ## Required Environment Variables
 
 Set these at minimum:

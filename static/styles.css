@@ -161,6 +161,15 @@ button:active {
 }
 
 .ghost-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3.45rem;
+  padding: 0 1.25rem;
+  border-radius: var(--radius-soft);
+  font-family: var(--sans-regular);
+  font-size: 1rem;
+  line-height: 1;
   background: transparent;
   color: var(--ink);
   border-color: var(--line);
@@ -191,6 +200,7 @@ button:active {
 
 .login-shell {
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   align-items: center;
 }
@@ -454,11 +464,13 @@ button:active {
 .monitor-meta span {
   display: inline-flex;
   align-items: center;
+  min-width: 0;
   min-height: 2.45rem;
   padding: 0.45rem 0.8rem;
   border: 1px solid var(--line);
   background: var(--bg-soft);
   color: var(--ink);
+  overflow-wrap: anywhere;
 }
 
 .hero-stats {
@@ -575,6 +587,26 @@ button:active {
 .console-actions {
   grid-template-columns: repeat(2, minmax(12rem, max-content));
   justify-content: start;
+}
+
+.console-secondary {
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+}
+
+.console-secondary summary {
+  color: var(--ink-soft);
+  font-family: var(--sans-regular);
+  font-size: 0.88rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.console-secondary[open] {
+  display: grid;
+  gap: 0.9rem;
 }
 
 .command-row {
@@ -769,6 +801,7 @@ select:focus {
 .data-table code {
   font-family: var(--mono);
   font-size: 0.86em;
+  overflow-wrap: anywhere;
 }
 
 .event-card--fresh {
@@ -850,6 +883,9 @@ select:focus {
   font-size: 0.95rem;
   font-weight: 400;
   color: inherit;
+  letter-spacing: 0;
+  text-transform: none;
+  font-family: var(--sans);
 }
 
 .assignment-form button {
@@ -945,9 +981,14 @@ select:focus {
 
 @media (max-width: 1180px) {
   .login-stage,
-  .hero-grid,
-  .section-intro {
+  .hero-grid {
     grid-template-columns: 1fr;
+  }
+
+  .section-intro {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: start;
   }
 
   .brand-highlights {

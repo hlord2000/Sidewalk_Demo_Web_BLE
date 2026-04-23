@@ -10,15 +10,25 @@ const eventLog = document.getElementById("event-log");
 const deviceSelector = document.getElementById("device-selector");
 const selectedDeviceChip = document.getElementById("selected-device-chip");
 const selectedTopicChip = document.getElementById("selected-topic-chip");
-const bleNamePrefixLabel = document.getElementById("ble-name-prefix");
-
 const bleStatus = document.getElementById("ble-status");
 const bleTerminal = document.getElementById("ble-terminal");
 const bleCommandForm = document.getElementById("ble-command-form");
 const bleCommandInput = document.getElementById("ble-command");
 const bleConnectButton = document.getElementById("ble-connect");
 const bleDisconnectButton = document.getElementById("ble-disconnect");
+const blePayloadForm = document.getElementById("ble-payload-form");
+const blePayloadInput = document.getElementById("ble-payload");
+const bleSendLinkInput = document.getElementById("ble-send-link");
+const bleLinkModeInput = document.getElementById("ble-link-mode");
+const bleMessageTypeInput = document.getElementById("ble-message-type");
+const blePayloadEncodingInput = document.getElementById("ble-payload-encoding");
+const blePayloadPresetInput = document.getElementById("ble-payload-preset");
+const bleCopyCommandButton = document.getElementById("ble-copy-command");
+const bleShortcutButtons = Array.from(document.querySelectorAll(".js-shell-command"));
+const bleWorkflowButtons = Array.from(document.querySelectorAll(".js-link-workflow"));
+const bleWorkflowStatus = document.getElementById("ble-workflow-status");
 const eventFeedStatus = document.getElementById("event-feed-status");
+const DEFAULT_BLE_WORKFLOW_STATUS = "";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder("utf-8");
@@ -452,7 +462,41 @@ let bleTxCharacteristic = null;
 let eventSource = null;
 let eventReconnectTimer = null;
 let eventReconnectDelay = 1000;
+let bleShellRecentText = "";
+let bleWorkflowRunning = false;
+let bleSidewalkWaiters = [];
+let bleSidewalkStatus = {
+  ble: null,
+  fsk: null,
+  lora: null,
+  updatedAt: 0,
+};
 const bleTerminalRenderer = new TerminalRenderer(bleTerminal);
+
+const BLE_STATUS_PATTERN = /Link status:\s*\{BLE:\s*(Up|Down),\s*FSK:\s*(Up|Down),\s*LoRa:\s*(Up|Down)\}/g;
+const BLE_WORKFLOWS = {
+  ble: {
+    label: "BLE",
+    statusKey: "ble",
+    flowTarget: "ble",
+    sendLink: 1,
+    lowLatency: false,
+  },
+  fsk: {
+    label: "FSK",
+    statusKey: "fsk",
+    flowTarget: "fsk",
+    sendLink: 2,
+    lowLatency: false,
+  },
+  lora: {
+    label: "LoRa LL",
+    statusKey: "lora",
+    flowTarget: "lora",
+    sendLink: 3,
+    lowLatency: true,
+  },
+};
 
 function currentDevice() {
   if (!deviceSelector) {
@@ -477,19 +521,294 @@ function updateSelectedDeviceUi() {
       : "No uplink topic configured";
   }
 
-  if (bleNamePrefixLabel) {
-    bleNamePrefixLabel.textContent = namePrefix;
-  }
-
   config.webShellNamePrefix = namePrefix;
 }
 
 function appendTerminal(text) {
+  bleShellRecentText = `${bleShellRecentText}${text}`.slice(-16000);
+  updateBleSidewalkStatusFromText();
   bleTerminalRenderer.feed(text);
 }
 
 function setBleStatus(text) {
   bleStatus.textContent = text;
+}
+
+function setBleWorkflowStatus(text) {
+  if (!bleWorkflowStatus) {
+    return;
+  }
+
+  bleWorkflowStatus.innerHTML = text;
+}
+
+function resetBleShellState() {
+  cancelBleSidewalkWaiters("BLE shell disconnected");
+  bleDevice = null;
+  bleServer = null;
+  bleRxCharacteristic = null;
+  bleTxCharacteristic = null;
+  bleShellRecentText = "";
+  bleWorkflowRunning = false;
+  clearBleSidewalkStatus();
+  setBleWorkflowButtonsDisabled(false);
+  setBleWorkflowStatus(DEFAULT_BLE_WORKFLOW_STATUS);
+}
+
+function clearBleSidewalkStatus() {
+  bleSidewalkStatus = {
+    ble: null,
+    fsk: null,
+    lora: null,
+    updatedAt: 0,
+  };
+}
+
+function cancelBleSidewalkWaiters(message) {
+  if (!bleSidewalkWaiters.length) {
+    return;
+  }
+
+  const error = new Error(message);
+
+  for (const waiter of bleSidewalkWaiters) {
+    window.clearTimeout(waiter.timeoutId);
+    waiter.reject(error);
+  }
+
+  bleSidewalkWaiters = [];
+}
+
+function notifyBleSidewalkWaiters() {
+  if (!bleSidewalkWaiters.length) {
+    return;
+  }
+
+  const pending = [];
+
+  for (const waiter of bleSidewalkWaiters) {
+    if (bleSidewalkStatus[waiter.statusKey] === "up") {
+      window.clearTimeout(waiter.timeoutId);
+      waiter.resolve();
+      continue;
+    }
+
+    pending.push(waiter);
+  }
+
+  bleSidewalkWaiters = pending;
+}
+
+function updateBleSidewalkStatusFromText() {
+  BLE_STATUS_PATTERN.lastIndex = 0;
+  let match = null;
+  let current = BLE_STATUS_PATTERN.exec(bleShellRecentText);
+
+  while (current) {
+    match = current;
+    current = BLE_STATUS_PATTERN.exec(bleShellRecentText);
+  }
+
+  if (!match) {
+    return;
+  }
+
+  bleSidewalkStatus = {
+    ble: match[1].toLowerCase(),
+    fsk: match[2].toLowerCase(),
+    lora: match[3].toLowerCase(),
+    updatedAt: Date.now(),
+  };
+
+  notifyBleSidewalkWaiters();
+}
+
+function setBleWorkflowButtonsDisabled(disabled) {
+  for (const button of bleWorkflowButtons) {
+    button.disabled = disabled;
+  }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+function normalizeHexPayload(value) {
+  const compact = value.replace(/[^0-9a-f]/gi, "");
+
+  if (!compact) {
+    throw new Error("Hex payload is empty");
+  }
+
+  if (compact.length % 2 !== 0) {
+    throw new Error("Hex payload must contain an even number of digits");
+  }
+
+  return compact.toLowerCase();
+}
+
+function buildBleSendCommand(options = {}) {
+  const payload = blePayloadInput ? blePayloadInput.value : "";
+  const encoding = blePayloadEncodingInput ? blePayloadEncodingInput.value : "text";
+
+  if (!payload.trim()) {
+    throw new Error("Payload is empty");
+  }
+
+  const hexPayload = encoding === "hex"
+    ? normalizeHexPayload(payload)
+    : bytesToHex(textEncoder.encode(payload));
+
+  const sendLink = options.linkOverride ?? (bleSendLinkInput ? bleSendLinkInput.value : "8");
+  const linkMode = bleLinkModeInput ? bleLinkModeInput.value : "1";
+  const messageType = bleMessageTypeInput ? bleMessageTypeInput.value : "2";
+
+  const prefix = options.flowTarget ? `sid flow send ${options.flowTarget}` : "sid send";
+  const parts = [`${prefix} -t ${messageType} -d ${linkMode}`];
+
+  if (!options.flowTarget) {
+    parts.push(`-l ${sendLink}`);
+  }
+
+  if (options.lowLatency) {
+    parts.push("-o 1");
+  }
+
+  parts.push(`-r ${hexPayload}`);
+  return parts.join(" ");
+}
+
+function applyBlePayloadPreset(preset) {
+  if (!blePayloadInput || !blePayloadEncodingInput || !bleMessageTypeInput || !bleLinkModeInput) {
+    return;
+  }
+
+  switch (preset) {
+    case "status":
+      blePayloadInput.value = "status";
+      blePayloadEncodingInput.value = "text";
+      bleMessageTypeInput.value = "0";
+      bleLinkModeInput.value = "1";
+      break;
+    case "hello":
+      blePayloadInput.value = "Hello from Web BLE";
+      blePayloadEncodingInput.value = "text";
+      bleMessageTypeInput.value = "2";
+      bleLinkModeInput.value = "1";
+      break;
+    case "json":
+      blePayloadInput.value = "{\"msg\":\"hello\",\"src\":\"web\"}";
+      blePayloadEncodingInput.value = "text";
+      bleMessageTypeInput.value = "2";
+      bleLinkModeInput.value = "1";
+      break;
+    default:
+      break;
+  }
+}
+
+async function runBleShellCommand(command) {
+  appendTerminal(`\n> ${command}\n`);
+
+  try {
+    await sendBleCommand(command);
+    return true;
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    setBleStatus(`BLE error: ${message}`);
+    appendTerminal(`[error] ${message}\n`);
+    return false;
+  }
+}
+
+async function ensureBleShellCommand(command) {
+  const ok = await runBleShellCommand(command);
+
+  if (!ok) {
+    throw new Error(`Failed to send shell command: ${command}`);
+  }
+}
+
+async function waitForBleSidewalkLinkUp(statusKey, timeoutMs = 45000) {
+  if (bleSidewalkStatus[statusKey] === "up") {
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    let waiter = null;
+
+    const cleanup = () => {
+      bleSidewalkWaiters = bleSidewalkWaiters.filter((entry) => entry !== waiter);
+      if (waiter && waiter.timeoutId) {
+        window.clearTimeout(waiter.timeoutId);
+      }
+    };
+
+    waiter = {
+      statusKey,
+      timeoutId: window.setTimeout(() => {
+        cleanup();
+        reject(new Error(`Timed out waiting for ${statusKey.toUpperCase()} to report Up`));
+      }, timeoutMs),
+      resolve: () => {
+        cleanup();
+        resolve();
+      },
+      reject: (error) => {
+        cleanup();
+        reject(error);
+      },
+    };
+
+    bleSidewalkWaiters.push(waiter);
+    notifyBleSidewalkWaiters();
+  });
+}
+
+async function runBleLinkWorkflow(workflowName) {
+  const workflow = BLE_WORKFLOWS[workflowName];
+
+  if (!workflow) {
+    throw new Error(`Unknown workflow: ${workflowName}`);
+  }
+
+  if (bleWorkflowRunning) {
+    throw new Error("Another BLE workflow is already running");
+  }
+
+  if (!bleRxCharacteristic) {
+    throw new Error("BLE shell is not connected");
+  }
+
+  bleWorkflowRunning = true;
+  bleShellRecentText = "";
+  clearBleSidewalkStatus();
+  setBleWorkflowButtonsDisabled(true);
+
+  if (bleSendLinkInput) {
+    bleSendLinkInput.value = String(workflow.sendLink);
+  }
+
+  const sendCommand = buildBleSendCommand({
+    flowTarget: workflow.flowTarget,
+    linkOverride: workflow.sendLink,
+    lowLatency: workflow.lowLatency,
+  });
+
+  try {
+    setBleWorkflowStatus(`Sending <code>${sendCommand}</code>`);
+    await ensureBleShellCommand(sendCommand);
+    setBleWorkflowStatus(`Sent <code>${sendCommand}</code>. Watch the shell for <code>Link status</code>, retries, and <code>on_msg_sent</code>.`);
+  } finally {
+    bleWorkflowRunning = false;
+    setBleWorkflowButtonsDisabled(false);
+  }
 }
 
 function setEventFeedStatus(text, state) {
@@ -639,6 +958,7 @@ async function connectBleShell() {
     if (tail) {
       appendTerminal(tail);
     }
+    resetBleShellState();
     setBleStatus("Disconnected");
     appendTerminal("\n[disconnected]\n");
   });
@@ -661,7 +981,11 @@ async function connectBleShell() {
 async function disconnectBleShell() {
   if (bleDevice && bleDevice.gatt.connected) {
     bleDevice.gatt.disconnect();
+    return;
   }
+
+  resetBleShellState();
+  setBleStatus("Disconnected");
 }
 
 async function sendBleCommand(command) {
@@ -702,6 +1026,74 @@ if (bleDisconnectButton) {
   });
 }
 
+if (bleShortcutButtons.length) {
+  for (const button of bleShortcutButtons) {
+    button.addEventListener("click", async () => {
+      const command = button.dataset.command;
+      if (!command) {
+        return;
+      }
+
+      await runBleShellCommand(command);
+    });
+  }
+}
+
+if (bleWorkflowButtons.length) {
+  for (const button of bleWorkflowButtons) {
+    button.addEventListener("click", async () => {
+      const workflowName = button.dataset.workflow;
+
+      if (!workflowName) {
+        return;
+      }
+
+      try {
+        await runBleLinkWorkflow(workflowName);
+      } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        setBleStatus(`BLE error: ${message}`);
+        setBleWorkflowStatus(`Workflow error: ${message}`);
+        appendTerminal(`[error] ${message}\n`);
+      }
+    });
+  }
+}
+
+if (blePayloadPresetInput) {
+  blePayloadPresetInput.addEventListener("change", () => {
+    applyBlePayloadPreset(blePayloadPresetInput.value);
+  });
+}
+
+if (bleCopyCommandButton) {
+  bleCopyCommandButton.addEventListener("click", () => {
+    try {
+      bleCommandInput.value = buildBleSendCommand();
+      bleCommandInput.focus();
+      bleCommandInput.select();
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      setBleStatus(`BLE error: ${message}`);
+    }
+  });
+}
+
+if (blePayloadForm) {
+  blePayloadForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    try {
+      const command = buildBleSendCommand();
+      await runBleShellCommand(command);
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      setBleStatus(`BLE error: ${message}`);
+      appendTerminal(`[error] ${message}\n`);
+    }
+  });
+}
+
 if (bleCommandForm) {
   bleCommandForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -709,14 +1101,21 @@ if (bleCommandForm) {
     if (!command) {
       return;
     }
-    appendTerminal(`\n> ${command}\n`);
     try {
-      await sendBleCommand(command);
-      bleCommandInput.value = "";
+      if (await runBleShellCommand(command)) {
+        bleCommandInput.value = "";
+      }
     } catch (error) {
       appendTerminal(`[error] ${error.message}\n`);
     }
   });
+}
+
+if (blePayloadInput && !blePayloadInput.value) {
+  applyBlePayloadPreset("hello");
+  if (blePayloadPresetInput) {
+    blePayloadPresetInput.value = "hello";
+  }
 }
 
 if (deviceSelector) {
