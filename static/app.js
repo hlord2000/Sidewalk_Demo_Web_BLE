@@ -10,31 +10,36 @@ const eventLog = document.getElementById("event-log");
 const deviceSelector = document.getElementById("device-selector");
 const selectedDeviceChip = document.getElementById("selected-device-chip");
 const selectedTopicChip = document.getElementById("selected-topic-chip");
+const bleNamePrefixLabel = document.getElementById("ble-name-prefix");
+
 const bleStatus = document.getElementById("ble-status");
 const bleTerminal = document.getElementById("ble-terminal");
 const bleCommandForm = document.getElementById("ble-command-form");
 const bleCommandInput = document.getElementById("ble-command");
 const bleConnectButton = document.getElementById("ble-connect");
 const bleDisconnectButton = document.getElementById("ble-disconnect");
-const blePayloadForm = document.getElementById("ble-payload-form");
-const blePayloadInput = document.getElementById("ble-payload");
-const bleSendLinkInput = document.getElementById("ble-send-link");
-const bleLinkModeInput = document.getElementById("ble-link-mode");
-const bleMessageTypeInput = document.getElementById("ble-message-type");
-const blePayloadEncodingInput = document.getElementById("ble-payload-encoding");
-const blePayloadPresetInput = document.getElementById("ble-payload-preset");
-const bleCopyCommandButton = document.getElementById("ble-copy-command");
-const bleShortcutButtons = Array.from(document.querySelectorAll(".js-shell-command"));
-const bleWorkflowButtons = Array.from(document.querySelectorAll(".js-link-workflow"));
-const bleWorkflowStatus = document.getElementById("ble-workflow-status");
 const eventFeedStatus = document.getElementById("event-feed-status");
-const DEFAULT_BLE_WORKFLOW_STATUS = "";
+const flashFileInput = document.getElementById("flash-file");
+const flashPresetSelect = document.getElementById("flash-preset");
+const flashConnectButton = document.getElementById("flash-connect");
+const flashDisconnectButton = document.getElementById("flash-disconnect");
+const flashButton = document.getElementById("flash-button");
+const flashEraseButton = document.getElementById("flash-erase");
+const flashRecoverButton = document.getElementById("flash-recover");
+const flashClearLogButton = document.getElementById("flash-clear-log");
+const flashStatus = document.getElementById("flash-status");
+const flashLog = document.getElementById("flash-log");
+const flashImageChip = document.getElementById("flash-image-chip");
+const flashProbeChip = document.getElementById("flash-probe-chip");
+const flashSupportChip = document.getElementById("flash-support-chip");
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder("utf-8");
 const devices = config.devices || [];
 const deviceMap = new Map(devices.map((device) => [String(device.id), device]));
 const deviceByWirelessId = new Map(devices.map((device) => [device.wirelessDeviceId, device]));
+const firmwareImages = config.firmwareImages || [];
+const firmwareImageMap = new Map(firmwareImages.map((image) => [image.id, image]));
 
 const ANSI_COLORS = [
   "#0f172a",
@@ -57,6 +62,29 @@ const ANSI_BRIGHT_COLORS = [
   "#14b8a6",
   "#cbd5e1",
 ];
+
+const FLASH_VENDOR_ID = 0x2886;
+const FLASH_PRODUCT_ID = 0x0066;
+const FLASH_SWD_CLOCK_HZ = 1_000_000;
+const FLASH_DAP_PROTOCOL_SWD = 1;
+const FLASH_DP_DPIDR = 0x0;
+const FLASH_CTRL_AP = 2 << 24;
+const FLASH_CTRL_AP_RESET = FLASH_CTRL_AP | 0x000;
+const FLASH_CTRL_AP_ERASEALL = FLASH_CTRL_AP | 0x004;
+const FLASH_CTRL_AP_ERASEALLSTATUS = FLASH_CTRL_AP | 0x008;
+const FLASH_CTRL_AP_ERASEPROTECTSTATUS = FLASH_CTRL_AP | 0x00c;
+const FLASH_CTRL_AP_IDR = FLASH_CTRL_AP | 0x0fc;
+const FLASH_RRAMC_COMMITWRITEBUF = 0x5004b008;
+const FLASH_RRAMC_READY = 0x5004b400;
+const FLASH_RRAMC_CONFIG = 0x5004b500;
+const FLASH_AIRCR = 0xe000ed0c;
+const FLASH_AIRCR_VECTKEY = 0x05fa0000;
+const FLASH_AIRCR_SYSRESETREQ = 1 << 2;
+const FLASH_PROGRESS_STEP = 16 * 1024;
+const FLASH_WRITE_BUFFER_LINES = 1;
+const FLASH_WRITE_CHUNK_BYTES = FLASH_WRITE_BUFFER_LINES * 16;
+const FLASH_WRITE_CONFIG = (FLASH_WRITE_BUFFER_LINES << 8) | 0x1;
+const FLASH_MAX_LOG_LINES = 240;
 
 function cloneStyle(style) {
   return {
@@ -462,41 +490,624 @@ let bleTxCharacteristic = null;
 let eventSource = null;
 let eventReconnectTimer = null;
 let eventReconnectDelay = 1000;
-let bleShellRecentText = "";
-let bleWorkflowRunning = false;
-let bleSidewalkWaiters = [];
-let bleSidewalkStatus = {
-  ble: null,
-  fsk: null,
-  lora: null,
-  updatedAt: 0,
-};
 const bleTerminalRenderer = new TerminalRenderer(bleTerminal);
+let flashDevice = null;
+let flashDap = null;
+let flashBusy = false;
+let flashLogLines = [];
+let flashPresetFile = null;
 
-const BLE_STATUS_PATTERN = /Link status:\s*\{BLE:\s*(Up|Down),\s*FSK:\s*(Up|Down),\s*LoRa:\s*(Up|Down)\}/g;
-const BLE_WORKFLOWS = {
-  ble: {
-    label: "BLE",
-    statusKey: "ble",
-    flowTarget: "ble",
-    sendLink: 1,
-    lowLatency: false,
-  },
-  fsk: {
-    label: "FSK",
-    statusKey: "fsk",
-    flowTarget: "fsk",
-    sendLink: 2,
-    lowLatency: false,
-  },
-  lora: {
-    label: "LoRa LL",
-    statusKey: "lora",
-    flowTarget: "lora",
-    sendLink: 3,
-    lowLatency: true,
-  },
-};
+function flashCurrentFile() {
+  if (flashFileInput && flashFileInput.files && flashFileInput.files[0]) {
+    return flashFileInput.files[0];
+  }
+  return flashPresetFile;
+}
+
+function flashSupportsWebUsb() {
+  return window.isSecureContext && !!navigator.usb;
+}
+
+function flashFormatHex(value, width = 8) {
+  return `0x${value.toString(16).padStart(width, "0")}`;
+}
+
+function flashLogMessage(message) {
+  if (!flashLog) {
+    return;
+  }
+
+  const stamp = new Date().toLocaleTimeString([], { hour12: false });
+  flashLogLines.push(`[${stamp}] ${message}`);
+  if (flashLogLines.length > FLASH_MAX_LOG_LINES) {
+    flashLogLines = flashLogLines.slice(-FLASH_MAX_LOG_LINES);
+  }
+
+  flashLog.textContent = flashLogLines.join("\n");
+  flashLog.scrollTop = flashLog.scrollHeight;
+}
+
+function setFlashStatus(text) {
+  if (flashStatus) {
+    flashStatus.textContent = text;
+  }
+}
+
+function flashMatchesDevice(device) {
+  return device.vendorId === FLASH_VENDOR_ID && device.productId === FLASH_PRODUCT_ID;
+}
+
+function flashSupportSummary() {
+  if (!window.isSecureContext) {
+    return "HTTPS or localhost required";
+  }
+  if (!navigator.usb) {
+    return "WebUSB unsupported";
+  }
+  if (!window.DAPjs) {
+    return "DAP runtime unavailable";
+  }
+  return "WebUSB ready";
+}
+
+function flashCurrentImageSummary() {
+  const file = flashCurrentFile();
+  if (!file) {
+    return "No firmware selected";
+  }
+
+  if (flashPresetFile && file === flashPresetFile) {
+    return `Built-in image: ${file.name}`;
+  }
+
+  return `Custom image: ${file.name}`;
+}
+
+function updateFlashUi() {
+  const file = flashCurrentFile();
+  const supported = flashSupportsWebUsb() && !!window.DAPjs;
+
+  if (flashSupportChip) {
+    flashSupportChip.textContent = flashSupportSummary();
+  }
+
+  if (flashProbeChip) {
+    flashProbeChip.textContent = flashDevice
+      ? `Probe: ${(flashDevice.productName || "CMSIS-DAP")} ${(flashDevice.serialNumber || "")}`.trim()
+      : "No probe selected";
+  }
+
+  if (flashImageChip) {
+    flashImageChip.textContent = flashCurrentImageSummary();
+  }
+
+  if (flashFileInput) {
+    flashFileInput.disabled = flashBusy;
+  }
+
+  if (flashPresetSelect) {
+    flashPresetSelect.disabled = flashBusy || firmwareImages.length === 0;
+  }
+
+  if (flashConnectButton) {
+    flashConnectButton.disabled = flashBusy || !supported;
+  }
+
+  if (flashDisconnectButton) {
+    flashDisconnectButton.disabled = flashBusy || (!flashDevice && !flashDap);
+  }
+
+  if (flashButton) {
+    flashButton.disabled = flashBusy || !supported || !file;
+  }
+
+  if (flashEraseButton) {
+    flashEraseButton.disabled = flashBusy || !supported;
+  }
+
+  if (flashRecoverButton) {
+    flashRecoverButton.disabled = flashBusy || !supported;
+  }
+}
+
+function flashHexByte(text, start) {
+  return Number.parseInt(text.slice(start, start + 2), 16);
+}
+
+function parseIntelHex(text) {
+  const segments = [];
+  let upperLinear = 0;
+  let upperSegment = 0;
+  let eofSeen = false;
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    if (!line.startsWith(":")) {
+      throw new Error(`Invalid Intel HEX record: ${line}`);
+    }
+
+    const bytes = [];
+    for (let idx = 1; idx < line.length; idx += 2) {
+      bytes.push(flashHexByte(line, idx));
+    }
+
+    const count = bytes[0];
+    const addr = (bytes[1] << 8) | bytes[2];
+    const type = bytes[3];
+    const data = bytes.slice(4, 4 + count);
+    const checksum = bytes[4 + count];
+    const sum = bytes.slice(0, 4 + count).reduce((acc, value) => (acc + value) & 0xff, 0);
+    const expectedChecksum = ((~sum + 1) & 0xff);
+
+    if (checksum !== expectedChecksum) {
+      throw new Error(`Bad checksum in record: ${line}`);
+    }
+
+    if (type === 0x00) {
+      const base =
+        upperLinear !== 0 ? (upperLinear << 16) :
+        upperSegment !== 0 ? (upperSegment << 4) :
+        0;
+      const absolute = base + addr;
+      const payload = Uint8Array.from(data);
+      const previous = segments.length > 0 ? segments[segments.length - 1] : null;
+
+      if (previous && previous.address + previous.data.length === absolute) {
+        const merged = new Uint8Array(previous.data.length + payload.length);
+        merged.set(previous.data);
+        merged.set(payload, previous.data.length);
+        previous.data = merged;
+      } else {
+        segments.push({ address: absolute, data: payload });
+      }
+      continue;
+    }
+
+    if (type === 0x01) {
+      eofSeen = true;
+      break;
+    }
+
+    if (type === 0x02) {
+      upperSegment = (data[0] << 8) | data[1];
+      upperLinear = 0;
+      continue;
+    }
+
+    if (type === 0x04) {
+      upperLinear = (data[0] << 8) | data[1];
+      upperSegment = 0;
+      continue;
+    }
+
+    if (type === 0x03 || type === 0x05) {
+      continue;
+    }
+
+    throw new Error(`Unsupported Intel HEX record type ${flashFormatHex(type, 2)}`);
+  }
+
+  if (!eofSeen) {
+    throw new Error("Intel HEX EOF record missing");
+  }
+
+  return segments;
+}
+
+function bytesToWords(bytes) {
+  const words = new Uint32Array(bytes.length / 4);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+  for (let idx = 0; idx < words.length; idx += 1) {
+    words[idx] = view.getUint32(idx * 4, true);
+  }
+
+  return words;
+}
+
+function wordsToBytes(words, length) {
+  const bytes = new Uint8Array(words.length * 4);
+  const view = new DataView(bytes.buffer);
+
+  for (let idx = 0; idx < words.length; idx += 1) {
+    view.setUint32(idx * 4, words[idx], true);
+  }
+
+  return bytes.subarray(0, length);
+}
+
+function wordToBytes(word) {
+  const bytes = new Uint8Array(4);
+  new DataView(bytes.buffer).setUint32(0, word >>> 0, true);
+  return bytes;
+}
+
+async function waitForCondition(condition, timeoutMs, intervalMs = 50) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await condition()) {
+      return;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`Timed out after ${timeoutMs} ms`);
+}
+
+async function waitFlashReady(dap) {
+  await waitForCondition(async () => (await dap.readMem32(FLASH_RRAMC_READY)) === 1, 10_000);
+}
+
+async function writePartialWords(dap, address, data) {
+  let offset = 0;
+
+  while (offset < data.length) {
+    const currentAddress = address + offset;
+    const alignedAddress = currentAddress & ~0x3;
+    const byteOffset = currentAddress & 0x3;
+    const count = Math.min(4 - byteOffset, data.length - offset);
+    const bytes = wordToBytes(await dap.readMem32(alignedAddress));
+
+    bytes.set(data.subarray(offset, offset + count), byteOffset);
+
+    const value = new DataView(bytes.buffer).getUint32(0, true);
+    await dap.writeMem32(alignedAddress, value);
+    offset += count;
+  }
+}
+
+async function readPartialWords(dap, address, length) {
+  const data = new Uint8Array(length);
+  let offset = 0;
+
+  while (offset < length) {
+    const currentAddress = address + offset;
+    const alignedAddress = currentAddress & ~0x3;
+    const byteOffset = currentAddress & 0x3;
+    const count = Math.min(4 - byteOffset, length - offset);
+    const bytes = wordToBytes(await dap.readMem32(alignedAddress));
+
+    data.set(bytes.subarray(byteOffset, byteOffset + count), offset);
+    offset += count;
+  }
+
+  return data;
+}
+
+async function writeFlashBytes(dap, address, data) {
+  let offset = 0;
+
+  if ((address & 0x3) !== 0) {
+    const prefixBytes = Math.min(4 - (address & 0x3), data.length);
+    await writePartialWords(dap, address, data.subarray(0, prefixBytes));
+    offset += prefixBytes;
+  }
+
+  const wordBytes = (data.length - offset) & ~0x3;
+  if (wordBytes > 0) {
+    const words = bytesToWords(data.subarray(offset, offset + wordBytes));
+    await dap.writeBlock(address + offset, words);
+    offset += wordBytes;
+  }
+
+  while (offset < data.length) {
+    const tailAddress = address + offset;
+    const tail = data.subarray(offset);
+    await writePartialWords(dap, tailAddress, tail);
+    offset += tail.length;
+  }
+}
+
+async function readFlashBytes(dap, address, length) {
+  const data = new Uint8Array(length);
+  let offset = 0;
+
+  if ((address & 0x3) !== 0) {
+    const prefixBytes = Math.min(4 - (address & 0x3), length);
+    data.set(await readPartialWords(dap, address, prefixBytes), 0);
+    offset += prefixBytes;
+  }
+
+  const wordBytes = (length - offset) & ~0x3;
+  if (wordBytes > 0) {
+    const words = await dap.readBlock(address + offset, wordBytes / 4);
+    data.set(wordsToBytes(words, wordBytes), offset);
+    offset += wordBytes;
+  }
+
+  while (offset < length) {
+    const tailAddress = address + offset;
+    const tailLength = length - offset;
+    data.set(await readPartialWords(dap, tailAddress, tailLength), offset);
+    offset += tailLength;
+  }
+
+  return data;
+}
+
+async function writeRramChunks(dap, segment, progress) {
+  const chunkSize = FLASH_WRITE_CHUNK_BYTES;
+  const data = segment.data;
+
+  for (let offset = 0; offset < data.length; offset += chunkSize) {
+    const chunk = data.subarray(offset, Math.min(offset + chunkSize, data.length));
+    const address = segment.address + offset;
+
+    await writeFlashBytes(dap, address, chunk);
+    if (chunk.length !== chunkSize) {
+      await dap.writeMem32(FLASH_RRAMC_COMMITWRITEBUF, 1);
+    }
+
+    progress(chunk.length);
+  }
+
+  await waitFlashReady(dap);
+}
+
+async function verifyFlashSegment(dap, segment, progress) {
+  const chunkSize = FLASH_WRITE_CHUNK_BYTES;
+  const data = segment.data;
+
+  for (let offset = 0; offset < data.length; offset += chunkSize) {
+    const chunk = data.subarray(offset, Math.min(offset + chunkSize, data.length));
+    const address = segment.address + offset;
+    const actual = await readFlashBytes(dap, address, chunk.length);
+
+    for (let idx = 0; idx < chunk.length; idx += 1) {
+      if (actual[idx] !== chunk[idx]) {
+        throw new Error(
+          `Verify failed at ${flashFormatHex(address + idx)}: expected ${flashFormatHex(chunk[idx], 2)}, got ${flashFormatHex(actual[idx], 2)}`
+        );
+      }
+    }
+
+    progress(chunk.length);
+  }
+}
+
+function makeFlashProgressLogger(label, totalBytes) {
+  let completed = 0;
+  let lastPrinted = 0;
+
+  return (delta) => {
+    completed += delta;
+    if ((completed - lastPrinted) < FLASH_PROGRESS_STEP && completed !== totalBytes) {
+      return;
+    }
+
+    lastPrinted = completed;
+    const percent = ((completed / totalBytes) * 100).toFixed(1);
+    flashLogMessage(`${label} ${completed}/${totalBytes} (${percent}%)`);
+  };
+}
+
+function makeFlashFile(name, text) {
+  if (typeof File === "function") {
+    return new File([text], name, { type: "text/plain" });
+  }
+
+  return {
+    name,
+    async text() {
+      return text;
+    },
+  };
+}
+
+function clearFlashPreset({ resetSelect = false } = {}) {
+  flashPresetFile = null;
+  if (resetSelect && flashPresetSelect) {
+    flashPresetSelect.value = "";
+  }
+}
+
+async function ensureFlashDeviceSelected() {
+  if (flashDevice) {
+    return flashDevice;
+  }
+
+  if (!flashSupportsWebUsb()) {
+    throw new Error("WebUSB requires HTTPS or localhost in a Chromium browser");
+  }
+  if (!window.DAPjs) {
+    throw new Error("DAPjs failed to load");
+  }
+
+  flashDevice = await navigator.usb.requestDevice({
+    filters: [{ vendorId: FLASH_VENDOR_ID, productId: FLASH_PRODUCT_ID }],
+  });
+  flashLogMessage(`Selected probe ${(flashDevice.productName || "CMSIS-DAP")} ${(flashDevice.serialNumber || "")}`.trim());
+  updateFlashUi();
+  return flashDevice;
+}
+
+async function getFlashDap() {
+  await ensureFlashDeviceSelected();
+
+  if (flashDap) {
+    return flashDap;
+  }
+
+  const transport = new window.DAPjs.WebUSB(flashDevice);
+  flashDap = new window.DAPjs.CortexM(transport, FLASH_DAP_PROTOCOL_SWD, FLASH_SWD_CLOCK_HZ);
+  await flashDap.connect();
+  return flashDap;
+}
+
+async function closeFlashSession({ clearDevice = false } = {}) {
+  if (flashDap) {
+    await flashDap.disconnect().catch(() => {});
+    flashDap = null;
+  }
+
+  if (flashDevice && flashDevice.opened) {
+    await flashDevice.close().catch(() => {});
+  }
+
+  if (clearDevice) {
+    flashDevice = null;
+  }
+
+  updateFlashUi();
+}
+
+async function connectFlashProbe() {
+  await ensureFlashDeviceSelected();
+  setFlashStatus("Probe selected");
+}
+
+async function disconnectFlashProbe() {
+  await closeFlashSession({ clearDevice: true });
+  setFlashStatus("Probe disconnected");
+  flashLogMessage("Probe disconnected");
+}
+
+async function loadFlashPreset(imageId) {
+  if (!imageId) {
+    clearFlashPreset();
+    setFlashStatus(flashCurrentFile() ? `Ready to flash ${flashCurrentFile().name}` : "Ready");
+    updateFlashUi();
+    return;
+  }
+
+  const image = firmwareImageMap.get(imageId);
+  if (!image) {
+    throw new Error(`Unknown firmware image: ${imageId}`);
+  }
+
+  flashBusy = true;
+  updateFlashUi();
+  setFlashStatus(`Loading built-in image ${image.name}...`);
+
+  try {
+    const response = await fetch(image.downloadUrl, { credentials: "same-origin" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} while loading ${image.name}`);
+    }
+
+    const hexText = await response.text();
+    flashPresetFile = makeFlashFile(image.name, hexText);
+    if (flashFileInput) {
+      flashFileInput.value = "";
+    }
+    flashLogMessage(`Loaded built-in image ${image.name}`);
+    setFlashStatus(`Ready to flash ${image.name}`);
+  } finally {
+    flashBusy = false;
+    updateFlashUi();
+  }
+}
+
+async function flashEraseAll(actionLabel) {
+  flashBusy = true;
+  updateFlashUi();
+  setFlashStatus(`${actionLabel} in progress...`);
+
+  try {
+    const dap = await getFlashDap();
+    const ctrlApIdr = await dap.readAP(FLASH_CTRL_AP_IDR);
+    const eraseProtectStatus = await dap.readAP(FLASH_CTRL_AP_ERASEPROTECTSTATUS);
+
+    flashLogMessage(`CTRL-AP IDR ${flashFormatHex(ctrlApIdr)}`);
+    flashLogMessage(`CTRL-AP ERASEPROTECTSTATUS ${flashFormatHex(eraseProtectStatus)}`);
+    flashLogMessage(`Issuing CTRL-AP ERASEALL for ${actionLabel.toLowerCase()}`);
+
+    await dap.writeAP(FLASH_CTRL_AP_ERASEALL, 1);
+    await waitForCondition(async () => {
+      const status = await dap.readAP(FLASH_CTRL_AP_ERASEALLSTATUS);
+      if (status === 2) {
+        return false;
+      }
+      if (status === 1) {
+        return true;
+      }
+      throw new Error(`ERASEALLSTATUS returned ${flashFormatHex(status)}`);
+    }, 30_000);
+
+    await dap.writeAP(FLASH_CTRL_AP_RESET, 2);
+    await dap.writeAP(FLASH_CTRL_AP_RESET, 0);
+
+    flashLogMessage(`${actionLabel} completed successfully`);
+    setFlashStatus(`${actionLabel} completed`);
+  } finally {
+    flashBusy = false;
+    await closeFlashSession();
+  }
+}
+
+async function flashSelectedFirmware() {
+  const file = flashCurrentFile();
+
+  if (!file) {
+    throw new Error("Choose a .hex file first");
+  }
+
+  flashBusy = true;
+  updateFlashUi();
+  setFlashStatus(`Flashing ${file.name}...`);
+
+  try {
+    flashLogMessage(`Loading ${file.name}`);
+    const hexText = await file.text();
+    const segments = parseIntelHex(hexText);
+    const totalBytes = segments.reduce((sum, segment) => sum + segment.data.length, 0);
+    const dap = await getFlashDap();
+
+    flashLogMessage(`Segments ${segments.length}`);
+    flashLogMessage(`Total bytes ${totalBytes}`);
+
+    const dpidr = await dap.readDP(FLASH_DP_DPIDR);
+    flashLogMessage(`DPIDR ${flashFormatHex(dpidr)}`);
+
+    await dap.halt();
+    flashLogMessage("Core halted");
+
+    await dap.writeMem32(FLASH_RRAMC_CONFIG, FLASH_WRITE_CONFIG);
+    await waitFlashReady(dap);
+    flashLogMessage(`RRAMC configured ${flashFormatHex(FLASH_WRITE_CONFIG)}`);
+
+    const reportProgram = makeFlashProgressLogger("program", totalBytes);
+    for (const segment of segments) {
+      flashLogMessage(`Programming ${segment.data.length} bytes at ${flashFormatHex(segment.address)}`);
+      await writeRramChunks(dap, segment, reportProgram);
+    }
+
+    await dap.writeMem32(FLASH_RRAMC_CONFIG, 0);
+    flashLogMessage("RRAMC restored read-only");
+
+    const reportVerify = makeFlashProgressLogger("verify", totalBytes);
+    for (const segment of segments) {
+      flashLogMessage(`Verifying ${segment.data.length} bytes at ${flashFormatHex(segment.address)}`);
+      await verifyFlashSegment(dap, segment, reportVerify);
+    }
+
+    await dap.writeMem32(FLASH_AIRCR, FLASH_AIRCR_VECTKEY | FLASH_AIRCR_SYSRESETREQ);
+    flashLogMessage("SYSRESETREQ sent");
+    flashLogMessage("Flash and verify completed successfully");
+    setFlashStatus(`Flash completed: ${file.name}`);
+  } finally {
+    flashBusy = false;
+    await closeFlashSession();
+  }
+}
+
+async function restoreFlashDevicePermission() {
+  if (!flashSupportsWebUsb() || !navigator.usb.getDevices) {
+    updateFlashUi();
+    return;
+  }
+
+  const devices = await navigator.usb.getDevices();
+  const remembered = devices.find(flashMatchesDevice) || null;
+  if (remembered) {
+    flashDevice = remembered;
+    setFlashStatus("Probe permission restored");
+  }
+
+  updateFlashUi();
+}
 
 function currentDevice() {
   if (!deviceSelector) {
@@ -521,294 +1132,19 @@ function updateSelectedDeviceUi() {
       : "No uplink topic configured";
   }
 
+  if (bleNamePrefixLabel) {
+    bleNamePrefixLabel.textContent = namePrefix;
+  }
+
   config.webShellNamePrefix = namePrefix;
 }
 
 function appendTerminal(text) {
-  bleShellRecentText = `${bleShellRecentText}${text}`.slice(-16000);
-  updateBleSidewalkStatusFromText();
   bleTerminalRenderer.feed(text);
 }
 
 function setBleStatus(text) {
   bleStatus.textContent = text;
-}
-
-function setBleWorkflowStatus(text) {
-  if (!bleWorkflowStatus) {
-    return;
-  }
-
-  bleWorkflowStatus.innerHTML = text;
-}
-
-function resetBleShellState() {
-  cancelBleSidewalkWaiters("BLE shell disconnected");
-  bleDevice = null;
-  bleServer = null;
-  bleRxCharacteristic = null;
-  bleTxCharacteristic = null;
-  bleShellRecentText = "";
-  bleWorkflowRunning = false;
-  clearBleSidewalkStatus();
-  setBleWorkflowButtonsDisabled(false);
-  setBleWorkflowStatus(DEFAULT_BLE_WORKFLOW_STATUS);
-}
-
-function clearBleSidewalkStatus() {
-  bleSidewalkStatus = {
-    ble: null,
-    fsk: null,
-    lora: null,
-    updatedAt: 0,
-  };
-}
-
-function cancelBleSidewalkWaiters(message) {
-  if (!bleSidewalkWaiters.length) {
-    return;
-  }
-
-  const error = new Error(message);
-
-  for (const waiter of bleSidewalkWaiters) {
-    window.clearTimeout(waiter.timeoutId);
-    waiter.reject(error);
-  }
-
-  bleSidewalkWaiters = [];
-}
-
-function notifyBleSidewalkWaiters() {
-  if (!bleSidewalkWaiters.length) {
-    return;
-  }
-
-  const pending = [];
-
-  for (const waiter of bleSidewalkWaiters) {
-    if (bleSidewalkStatus[waiter.statusKey] === "up") {
-      window.clearTimeout(waiter.timeoutId);
-      waiter.resolve();
-      continue;
-    }
-
-    pending.push(waiter);
-  }
-
-  bleSidewalkWaiters = pending;
-}
-
-function updateBleSidewalkStatusFromText() {
-  BLE_STATUS_PATTERN.lastIndex = 0;
-  let match = null;
-  let current = BLE_STATUS_PATTERN.exec(bleShellRecentText);
-
-  while (current) {
-    match = current;
-    current = BLE_STATUS_PATTERN.exec(bleShellRecentText);
-  }
-
-  if (!match) {
-    return;
-  }
-
-  bleSidewalkStatus = {
-    ble: match[1].toLowerCase(),
-    fsk: match[2].toLowerCase(),
-    lora: match[3].toLowerCase(),
-    updatedAt: Date.now(),
-  };
-
-  notifyBleSidewalkWaiters();
-}
-
-function setBleWorkflowButtonsDisabled(disabled) {
-  for (const button of bleWorkflowButtons) {
-    button.disabled = disabled;
-  }
-}
-
-function delay(ms) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
-
-function bytesToHex(bytes) {
-  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
-}
-
-function normalizeHexPayload(value) {
-  const compact = value.replace(/[^0-9a-f]/gi, "");
-
-  if (!compact) {
-    throw new Error("Hex payload is empty");
-  }
-
-  if (compact.length % 2 !== 0) {
-    throw new Error("Hex payload must contain an even number of digits");
-  }
-
-  return compact.toLowerCase();
-}
-
-function buildBleSendCommand(options = {}) {
-  const payload = blePayloadInput ? blePayloadInput.value : "";
-  const encoding = blePayloadEncodingInput ? blePayloadEncodingInput.value : "text";
-
-  if (!payload.trim()) {
-    throw new Error("Payload is empty");
-  }
-
-  const hexPayload = encoding === "hex"
-    ? normalizeHexPayload(payload)
-    : bytesToHex(textEncoder.encode(payload));
-
-  const sendLink = options.linkOverride ?? (bleSendLinkInput ? bleSendLinkInput.value : "8");
-  const linkMode = bleLinkModeInput ? bleLinkModeInput.value : "1";
-  const messageType = bleMessageTypeInput ? bleMessageTypeInput.value : "2";
-
-  const prefix = options.flowTarget ? `sid flow send ${options.flowTarget}` : "sid send";
-  const parts = [`${prefix} -t ${messageType} -d ${linkMode}`];
-
-  if (!options.flowTarget) {
-    parts.push(`-l ${sendLink}`);
-  }
-
-  if (options.lowLatency) {
-    parts.push("-o 1");
-  }
-
-  parts.push(`-r ${hexPayload}`);
-  return parts.join(" ");
-}
-
-function applyBlePayloadPreset(preset) {
-  if (!blePayloadInput || !blePayloadEncodingInput || !bleMessageTypeInput || !bleLinkModeInput) {
-    return;
-  }
-
-  switch (preset) {
-    case "status":
-      blePayloadInput.value = "status";
-      blePayloadEncodingInput.value = "text";
-      bleMessageTypeInput.value = "0";
-      bleLinkModeInput.value = "1";
-      break;
-    case "hello":
-      blePayloadInput.value = "Hello from Web BLE";
-      blePayloadEncodingInput.value = "text";
-      bleMessageTypeInput.value = "2";
-      bleLinkModeInput.value = "1";
-      break;
-    case "json":
-      blePayloadInput.value = "{\"msg\":\"hello\",\"src\":\"web\"}";
-      blePayloadEncodingInput.value = "text";
-      bleMessageTypeInput.value = "2";
-      bleLinkModeInput.value = "1";
-      break;
-    default:
-      break;
-  }
-}
-
-async function runBleShellCommand(command) {
-  appendTerminal(`\n> ${command}\n`);
-
-  try {
-    await sendBleCommand(command);
-    return true;
-  } catch (error) {
-    const message = error && error.message ? error.message : String(error);
-    setBleStatus(`BLE error: ${message}`);
-    appendTerminal(`[error] ${message}\n`);
-    return false;
-  }
-}
-
-async function ensureBleShellCommand(command) {
-  const ok = await runBleShellCommand(command);
-
-  if (!ok) {
-    throw new Error(`Failed to send shell command: ${command}`);
-  }
-}
-
-async function waitForBleSidewalkLinkUp(statusKey, timeoutMs = 45000) {
-  if (bleSidewalkStatus[statusKey] === "up") {
-    return;
-  }
-
-  await new Promise((resolve, reject) => {
-    let waiter = null;
-
-    const cleanup = () => {
-      bleSidewalkWaiters = bleSidewalkWaiters.filter((entry) => entry !== waiter);
-      if (waiter && waiter.timeoutId) {
-        window.clearTimeout(waiter.timeoutId);
-      }
-    };
-
-    waiter = {
-      statusKey,
-      timeoutId: window.setTimeout(() => {
-        cleanup();
-        reject(new Error(`Timed out waiting for ${statusKey.toUpperCase()} to report Up`));
-      }, timeoutMs),
-      resolve: () => {
-        cleanup();
-        resolve();
-      },
-      reject: (error) => {
-        cleanup();
-        reject(error);
-      },
-    };
-
-    bleSidewalkWaiters.push(waiter);
-    notifyBleSidewalkWaiters();
-  });
-}
-
-async function runBleLinkWorkflow(workflowName) {
-  const workflow = BLE_WORKFLOWS[workflowName];
-
-  if (!workflow) {
-    throw new Error(`Unknown workflow: ${workflowName}`);
-  }
-
-  if (bleWorkflowRunning) {
-    throw new Error("Another BLE workflow is already running");
-  }
-
-  if (!bleRxCharacteristic) {
-    throw new Error("BLE shell is not connected");
-  }
-
-  bleWorkflowRunning = true;
-  bleShellRecentText = "";
-  clearBleSidewalkStatus();
-  setBleWorkflowButtonsDisabled(true);
-
-  if (bleSendLinkInput) {
-    bleSendLinkInput.value = String(workflow.sendLink);
-  }
-
-  const sendCommand = buildBleSendCommand({
-    flowTarget: workflow.flowTarget,
-    linkOverride: workflow.sendLink,
-    lowLatency: workflow.lowLatency,
-  });
-
-  try {
-    setBleWorkflowStatus(`Sending <code>${sendCommand}</code>`);
-    await ensureBleShellCommand(sendCommand);
-    setBleWorkflowStatus(`Sent <code>${sendCommand}</code>. Watch the shell for <code>Link status</code>, retries, and <code>on_msg_sent</code>.`);
-  } finally {
-    bleWorkflowRunning = false;
-    setBleWorkflowButtonsDisabled(false);
-  }
 }
 
 function setEventFeedStatus(text, state) {
@@ -958,7 +1294,6 @@ async function connectBleShell() {
     if (tail) {
       appendTerminal(tail);
     }
-    resetBleShellState();
     setBleStatus("Disconnected");
     appendTerminal("\n[disconnected]\n");
   });
@@ -981,11 +1316,7 @@ async function connectBleShell() {
 async function disconnectBleShell() {
   if (bleDevice && bleDevice.gatt.connected) {
     bleDevice.gatt.disconnect();
-    return;
   }
-
-  resetBleShellState();
-  setBleStatus("Disconnected");
 }
 
 async function sendBleCommand(command) {
@@ -1026,74 +1357,6 @@ if (bleDisconnectButton) {
   });
 }
 
-if (bleShortcutButtons.length) {
-  for (const button of bleShortcutButtons) {
-    button.addEventListener("click", async () => {
-      const command = button.dataset.command;
-      if (!command) {
-        return;
-      }
-
-      await runBleShellCommand(command);
-    });
-  }
-}
-
-if (bleWorkflowButtons.length) {
-  for (const button of bleWorkflowButtons) {
-    button.addEventListener("click", async () => {
-      const workflowName = button.dataset.workflow;
-
-      if (!workflowName) {
-        return;
-      }
-
-      try {
-        await runBleLinkWorkflow(workflowName);
-      } catch (error) {
-        const message = error && error.message ? error.message : String(error);
-        setBleStatus(`BLE error: ${message}`);
-        setBleWorkflowStatus(`Workflow error: ${message}`);
-        appendTerminal(`[error] ${message}\n`);
-      }
-    });
-  }
-}
-
-if (blePayloadPresetInput) {
-  blePayloadPresetInput.addEventListener("change", () => {
-    applyBlePayloadPreset(blePayloadPresetInput.value);
-  });
-}
-
-if (bleCopyCommandButton) {
-  bleCopyCommandButton.addEventListener("click", () => {
-    try {
-      bleCommandInput.value = buildBleSendCommand();
-      bleCommandInput.focus();
-      bleCommandInput.select();
-    } catch (error) {
-      const message = error && error.message ? error.message : String(error);
-      setBleStatus(`BLE error: ${message}`);
-    }
-  });
-}
-
-if (blePayloadForm) {
-  blePayloadForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-
-    try {
-      const command = buildBleSendCommand();
-      await runBleShellCommand(command);
-    } catch (error) {
-      const message = error && error.message ? error.message : String(error);
-      setBleStatus(`BLE error: ${message}`);
-      appendTerminal(`[error] ${message}\n`);
-    }
-  });
-}
-
 if (bleCommandForm) {
   bleCommandForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -1101,21 +1364,14 @@ if (bleCommandForm) {
     if (!command) {
       return;
     }
+    appendTerminal(`\n> ${command}\n`);
     try {
-      if (await runBleShellCommand(command)) {
-        bleCommandInput.value = "";
-      }
+      await sendBleCommand(command);
+      bleCommandInput.value = "";
     } catch (error) {
       appendTerminal(`[error] ${error.message}\n`);
     }
   });
-}
-
-if (blePayloadInput && !blePayloadInput.value) {
-  applyBlePayloadPreset("hello");
-  if (blePayloadPresetInput) {
-    blePayloadPresetInput.value = "hello";
-  }
 }
 
 if (deviceSelector) {
@@ -1125,5 +1381,112 @@ if (deviceSelector) {
   });
 }
 
+if (flashConnectButton) {
+  flashConnectButton.addEventListener("click", async () => {
+    try {
+      await connectFlashProbe();
+    } catch (error) {
+      const message = error.message || String(error);
+      setFlashStatus(`Probe error: ${message}`);
+      flashLogMessage(`Probe error: ${message}`);
+      updateFlashUi();
+    }
+  });
+}
+
+if (flashDisconnectButton) {
+  flashDisconnectButton.addEventListener("click", async () => {
+    await disconnectFlashProbe();
+  });
+}
+
+if (flashButton) {
+  flashButton.addEventListener("click", async () => {
+    try {
+      await flashSelectedFirmware();
+    } catch (error) {
+      const message = error.message || String(error);
+      setFlashStatus(`Flash failed: ${message}`);
+      flashLogMessage(`Flash failed: ${message}`);
+      updateFlashUi();
+    }
+  });
+}
+
+if (flashEraseButton) {
+  flashEraseButton.addEventListener("click", async () => {
+    try {
+      await flashEraseAll("Erase");
+    } catch (error) {
+      const message = error.message || String(error);
+      setFlashStatus(`Erase failed: ${message}`);
+      flashLogMessage(`Erase failed: ${message}`);
+      updateFlashUi();
+    }
+  });
+}
+
+if (flashRecoverButton) {
+  flashRecoverButton.addEventListener("click", async () => {
+    try {
+      await flashEraseAll("Recover / unlock");
+    } catch (error) {
+      const message = error.message || String(error);
+      setFlashStatus(`Recover failed: ${message}`);
+      flashLogMessage(`Recover failed: ${message}`);
+      updateFlashUi();
+    }
+  });
+}
+
+if (flashClearLogButton) {
+  flashClearLogButton.addEventListener("click", () => {
+    flashLogLines = [];
+    if (flashLog) {
+      flashLog.textContent = "";
+    }
+  });
+}
+
+if (flashFileInput) {
+  flashFileInput.addEventListener("change", () => {
+    clearFlashPreset({ resetSelect: true });
+    const file = flashCurrentFile();
+    setFlashStatus(file ? `Ready to flash ${file.name}` : "Ready");
+    updateFlashUi();
+  });
+}
+
+if (flashPresetSelect) {
+  flashPresetSelect.addEventListener("change", async () => {
+    try {
+      await loadFlashPreset(flashPresetSelect.value);
+    } catch (error) {
+      const message = error.message || String(error);
+      clearFlashPreset({ resetSelect: true });
+      setFlashStatus(`Preset load failed: ${message}`);
+      flashLogMessage(`Preset load failed: ${message}`);
+      updateFlashUi();
+    }
+  });
+}
+
+if (navigator.usb) {
+  navigator.usb.addEventListener("disconnect", async (event) => {
+    if (!flashDevice || event.device !== flashDevice) {
+      return;
+    }
+
+    await closeFlashSession({ clearDevice: true });
+    setFlashStatus("Probe disconnected");
+    flashLogMessage("Probe removed");
+  });
+}
+
 updateSelectedDeviceUi();
 connectEventStream();
+updateFlashUi();
+restoreFlashDevicePermission().catch((error) => {
+  flashLogMessage(`Probe restore failed: ${error.message || error}`);
+  updateFlashUi();
+});

@@ -1,0 +1,12 @@
+{
+  "name": "xiao-nrf54-webusb-flasher",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "flash": "node flash_nrf54_cli.mjs"
+  },
+  "dependencies": {
+    "dapjs": "^2.3.0",
+    "webusb": "^2.2.0"
+  }
+}

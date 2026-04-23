@@ -19,7 +19,6 @@ Flask web app for a Sidewalk device demo:
 ## Local Run
 
 ```sh
-cd tools/web_demo
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -36,24 +35,6 @@ python app.py
 ```
 
 The app listens on `0.0.0.0:${PORT:-8000}`.
-
-## WebUSB Smoke Test
-
-For local probe validation without signing in:
-
-```sh
-node scripts/webusb_smoke_cdp.js
-```
-
-This launches an isolated Chrome profile, opens the local `webusb-smoke.html`
-page from this repo, clicks the WebUSB request button, auto-selects the
-CMSIS-DAP chooser entry through Chrome DevTools Protocol, reads CMSIS-DAP
-metadata, and then releases the probe.
-
-If Chrome does not emit the DevTools chooser event on the first run, select the
-device once manually. The script keeps a local `.webusb-smoke-profile/`
-Chrome profile so later runs can reuse the granted WebUSB permission through
-the page's authorized-device path.
 
 ## Required Environment Variables
 
@@ -82,7 +63,6 @@ This folder can still be deployed as its own repo root if you want to split the
 web service out later.
 
 ```sh
-cd tools/web_demo
 git init -b main
 git add .
 git commit -m "Prepare Sidewalk web demo for Railway"

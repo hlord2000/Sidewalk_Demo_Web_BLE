@@ -242,28 +242,7 @@
             {% for device in devices %}
             <tr>
               <td>{{ device.name }}</td>
-              <td>
-                <form method="post" action="{{ url_for('update_device_assignment', device_id=device.id) }}" class="assignment-form">
-                  <div class="assignment-list" aria-label="Assigned customer accounts for {{ device.name }}">
-                    {% for customer in customers %}
-                    <label class="assignment-option">
-                      <input type="checkbox" name="customer_user_ids" value="{{ customer.id }}" {% if customer.id in device.customer_ids %}checked{% endif %}>
-                      <span>{{ customer.display_name or customer.email }}</span>
-                    </label>
-                    {% else %}
-                    <div class="table-hint">No customer accounts yet.</div>
-                    {% endfor %}
-                  </div>
-                  <button type="submit" class="ghost-button">Save</button>
-                </form>
-                {% if device.customer_emails %}
-                <div class="table-hint">
-                  {% for email in device.customer_emails %}
-                  <code>{{ email }}</code>{% if not loop.last %}, {% endif %}
-                  {% endfor %}
-                </div>
-                {% endif %}
-              </td>
+              <td>{{ device.customer_name or "Unassigned" }}</td>
               <td><code>{{ device.wireless_device_id }}</code></td>
               <td><code>{{ device.uplink_topic or "-" }}</code></td>
               <td><code>{{ device.device_profile_id or "-" }}</code></td>

@@ -7,15 +7,18 @@ import queue
 import sqlite3
 from datetime import timedelta
 from functools import wraps
+from pathlib import Path
 
 from flask import (
     Flask,
     Response,
+    abort,
     flash,
     jsonify,
     redirect,
     render_template,
     request,
+    send_file,
     session,
     url_for,
 )
@@ -28,6 +31,18 @@ from storage import DemoStore
 
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
+
+WEB_DEMO_ROOT = Path(__file__).resolve().parent
+FLASH_IMAGE_MANIFEST = {
+    "aodemo1": {
+        "name": "AODemo1.hex",
+        "path": WEB_DEMO_ROOT / "firmware/AODemo1.hex",
+    },
+    "aodemo2": {
+        "name": "AODemo2.hex",
+        "path": WEB_DEMO_ROOT / "firmware/AODemo2.hex",
+    },
+}
 
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
@@ -89,6 +104,8 @@ def _device_summary(device: dict) -> dict:
         "wirelessDeviceId": device["wireless_device_id"],
         "uplinkTopic": device["uplink_topic"],
         "bleNamePrefix": device.get("ble_name_prefix") or "XIAO-WebShell",
+        "customerName": device.get("customer_name") or "",
+        "customerEmail": device.get("customer_email") or "",
     }
 
 
@@ -121,6 +138,24 @@ def _event_visible(event: dict, allowed_wireless_ids: set[str], selected_wireles
 
 def _sync_topics() -> None:
     cloud_service.sync_topics(store.unique_uplink_topics())
+
+
+def _available_firmware_images() -> list[dict]:
+    images = []
+    for image_id, entry in FLASH_IMAGE_MANIFEST.items():
+        path = entry["path"]
+        if not path.is_file():
+            LOGGER.warning("Firmware image missing from dashboard manifest: %s", path)
+            continue
+        images.append(
+            {
+                "id": image_id,
+                "name": entry["name"],
+                "sizeBytes": path.stat().st_size,
+                "downloadUrl": url_for("firmware_image", image_id=image_id),
+            }
+        )
+    return images
 
 
 def _load_or_refresh_artifacts(device: dict) -> tuple[dict, dict, dict]:
@@ -208,8 +243,28 @@ def dashboard():
         "nusTxUuid": DemoConfig.NUS_TX_UUID,
         "webShellNamePrefix": (selected_device or {}).get("ble_name_prefix", "XIAO-WebShell"),
         "adminUrl": url_for("admin") if user["role"] == "admin" else "",
+        "firmwareImages": _available_firmware_images(),
     }
     return render_template("dashboard.html", page_config=page_config)
+
+
+@app.get("/firmware-images/<image_id>")
+@login_required
+def firmware_image(image_id: str):
+    entry = FLASH_IMAGE_MANIFEST.get(image_id)
+    if entry is None:
+        abort(404)
+
+    path = entry["path"]
+    if not path.is_file():
+        abort(404)
+
+    return send_file(
+        path,
+        mimetype="text/plain; charset=utf-8",
+        download_name=entry["name"],
+        max_age=0,
+    )
 
 
 @app.get("/admin")
@@ -250,13 +305,6 @@ def create_customer():
     return redirect(url_for("admin"))
 
 
-def _customer_id_from_form(raw_customer_id: str) -> int | None:
-    customer_id_text = raw_customer_id.strip()
-    if not customer_id_text:
-        return None
-    return int(customer_id_text)
-
-
 @app.post("/admin/devices/import")
 @admin_required
 def import_device():
@@ -273,16 +321,7 @@ def import_device():
         flash("Imported devices need a name and WirelessDeviceId.", "error")
         return redirect(url_for("admin"))
 
-    try:
-        customer_id = _customer_id_from_form(customer_user_id)
-    except ValueError:
-        flash("Choose a valid customer before importing the device.", "error")
-        return redirect(url_for("admin"))
-
-    if customer_id is not None and store.get_customer(customer_id) is None:
-        flash("Choose a valid customer before importing the device.", "error")
-        return redirect(url_for("admin"))
-
+    customer_id = int(customer_user_id) if customer_user_id else None
     wireless_device_json = None
     device_profile_json = None
     provisioning_json = None
@@ -334,16 +373,6 @@ def create_device():
         return redirect(url_for("admin"))
 
     try:
-        customer_id = _customer_id_from_form(customer_user_id)
-    except ValueError:
-        flash("Choose a valid customer before creating the device.", "error")
-        return redirect(url_for("admin"))
-
-    if customer_id is not None and store.get_customer(customer_id) is None:
-        flash("Choose a valid customer before creating the device.", "error")
-        return redirect(url_for("admin"))
-
-    try:
         created = cloud_service.create_wireless_device(
             name=name,
             description=description,
@@ -355,7 +384,7 @@ def create_device():
             device_profile_id=device_profile_id,
         )
         store.create_device_record(
-            customer_user_id=customer_id,
+            customer_user_id=int(customer_user_id) if customer_user_id else None,
             name=name,
             description=description,
             wireless_device_id=created["id"],
@@ -377,43 +406,6 @@ def create_device():
 
     _sync_topics()
     flash(f"Created AWS Sidewalk device {name}.", "success")
-    return redirect(url_for("admin"))
-
-
-@app.post("/admin/devices/<int:device_id>/assignment")
-@admin_required
-def update_device_assignment(device_id: int):
-    device = store.get_device(device_id)
-    if device is None:
-        flash("Device not found.", "error")
-        return redirect(url_for("admin"))
-
-    customer_ids: list[int] = []
-    customer_names: list[str] = []
-    for raw_customer_id in request.form.getlist("customer_user_ids"):
-        try:
-            customer_id = _customer_id_from_form(raw_customer_id)
-        except ValueError:
-            flash("Choose valid customer accounts before saving access.", "error")
-            return redirect(url_for("admin"))
-        if customer_id is None:
-            continue
-        customer = store.get_customer(customer_id)
-        if customer is None:
-            flash("Choose valid customer accounts before saving access.", "error")
-            return redirect(url_for("admin"))
-        customer_ids.append(customer_id)
-        customer_names.append(customer["display_name"] or customer["email"])
-
-    updated_device = store.set_device_customers(device_id, customer_ids)
-    if updated_device is None:
-        flash("Device not found.", "error")
-        return redirect(url_for("admin"))
-
-    if not customer_names:
-        flash(f"Removed all customer access from {updated_device['name']}.", "success")
-    else:
-        flash(f"Updated access for {updated_device['name']}: {', '.join(customer_names)}.", "success")
     return redirect(url_for("admin"))
 
 

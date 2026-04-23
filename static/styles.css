@@ -161,15 +161,6 @@ button:active {
 }
 
 .ghost-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 3.45rem;
-  padding: 0 1.25rem;
-  border-radius: var(--radius-soft);
-  font-family: var(--sans-regular);
-  font-size: 1rem;
-  line-height: 1;
   background: transparent;
   color: var(--ink);
   border-color: var(--line);
@@ -200,7 +191,6 @@ button:active {
 
 .login-shell {
   min-height: 100vh;
-  min-height: 100dvh;
   display: grid;
   align-items: center;
 }
@@ -464,13 +454,11 @@ button:active {
 .monitor-meta span {
   display: inline-flex;
   align-items: center;
-  min-width: 0;
   min-height: 2.45rem;
   padding: 0.45rem 0.8rem;
   border: 1px solid var(--line);
   background: var(--bg-soft);
   color: var(--ink);
-  overflow-wrap: anywhere;
 }
 
 .hero-stats {
@@ -584,29 +572,17 @@ button:active {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.inline-actions--triple {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .console-actions {
   grid-template-columns: repeat(2, minmax(12rem, max-content));
   justify-content: start;
 }
 
-.console-secondary {
-  padding: 0.9rem 1rem;
-  border: 1px solid var(--line);
-  background: var(--bg-soft);
-}
-
-.console-secondary summary {
-  color: var(--ink-soft);
-  font-family: var(--sans-regular);
-  font-size: 0.88rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.console-secondary[open] {
-  display: grid;
-  gap: 0.9rem;
+.flash-source-grid {
+  align-items: end;
 }
 
 .command-row {
@@ -688,6 +664,7 @@ select:focus {
 .flash-box,
 .error-box,
 .status-box,
+.flash-log,
 .terminal,
 .event-log {
   border: 1px solid var(--line);
@@ -729,6 +706,32 @@ select:focus {
   white-space: pre-wrap;
   font-family: var(--mono);
   font-size: 0.9rem;
+}
+
+.flash-log {
+  min-height: 18rem;
+  max-height: min(34rem, 52vh);
+  margin: 0;
+  overflow: auto;
+  padding: 1rem;
+  background:
+    linear-gradient(180deg, rgba(0, 169, 206, 0.06), transparent 2.5rem),
+    linear-gradient(180deg, #2f3b44 0%, #333f48 100%);
+  color: #f7fbfb;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.flash-clear-button {
+  justify-self: start;
+  width: fit-content;
+}
+
+.flash-note {
+  margin: 0;
 }
 
 .terminal {
@@ -801,7 +804,6 @@ select:focus {
 .data-table code {
   font-family: var(--mono);
   font-size: 0.86em;
-  overflow-wrap: anywhere;
 }
 
 .event-card--fresh {
@@ -847,55 +849,6 @@ select:focus {
   display: flex;
   flex-wrap: wrap;
   gap: 0.55rem;
-}
-
-.assignment-form {
-  display: grid;
-  grid-template-columns: minmax(13rem, 1fr) auto;
-  gap: 0.55rem;
-  align-items: start;
-}
-
-.assignment-form button {
-  min-width: 0;
-}
-
-.assignment-list {
-  display: grid;
-  gap: 0.4rem;
-}
-
-.assignment-option {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.55rem;
-  min-width: 0;
-  color: var(--ink);
-}
-
-.assignment-option input {
-  width: auto;
-  margin: 0.18rem 0 0;
-}
-
-.assignment-option span {
-  min-width: 0;
-  font-size: 0.95rem;
-  font-weight: 400;
-  color: inherit;
-  letter-spacing: 0;
-  text-transform: none;
-  font-family: var(--sans);
-}
-
-.assignment-form button {
-  min-width: 0;
-}
-
-.table-hint {
-  margin-top: 0.45rem;
-  color: var(--ink-soft);
-  font-size: 0.9rem;
 }
 
 .table-actions form {
@@ -981,14 +934,9 @@ select:focus {
 
 @media (max-width: 1180px) {
   .login-stage,
-  .hero-grid {
-    grid-template-columns: 1fr;
-  }
-
+  .hero-grid,
   .section-intro {
-    display: grid;
     grid-template-columns: 1fr;
-    align-items: start;
   }
 
   .brand-highlights {
@@ -1036,10 +984,6 @@ select:focus {
   .monitor-meta,
   .nordic-footer {
     display: grid;
-  }
-
-  .assignment-form {
-    grid-template-columns: 1fr;
   }
 
   .hero-meta span,

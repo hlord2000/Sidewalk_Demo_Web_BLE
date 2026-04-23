@@ -6,4 +6,4 @@ __pycache__/
 !.env.example
 .railway/
 *.db
-.webusb-smoke-profile/
+flasher/node_modules/
