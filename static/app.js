@@ -835,7 +835,10 @@ async function writeFlashBytes(dap, address, data) {
   const wordBytes = (data.length - offset) & ~0x3;
   if (wordBytes > 0) {
     const words = bytesToWords(data.subarray(offset, offset + wordBytes));
-    await dap.writeBlock(address + offset, words);
+    const wordBase = address + offset;
+    for (let idx = 0; idx < words.length; idx += 1) {
+      await dap.writeMem32(wordBase + (idx * 4), words[idx]);
+    }
     offset += wordBytes;
   }
 
@@ -859,7 +862,11 @@ async function readFlashBytes(dap, address, length) {
 
   const wordBytes = (length - offset) & ~0x3;
   if (wordBytes > 0) {
-    const words = await dap.readBlock(address + offset, wordBytes / 4);
+    const words = new Uint32Array(wordBytes / 4);
+    const wordBase = address + offset;
+    for (let idx = 0; idx < words.length; idx += 1) {
+      words[idx] = await dap.readMem32(wordBase + (idx * 4));
+    }
     data.set(wordsToBytes(words, wordBytes), offset);
     offset += wordBytes;
   }
