@@ -78,7 +78,7 @@ const ANSI_BRIGHT_COLORS = [
 
 const FLASH_VENDOR_ID = 0x2886;
 const FLASH_PRODUCT_ID = 0x0066;
-const FLASH_SWD_CLOCK_HZ = 1_000_000;
+const FLASH_SWD_CLOCK_HZ = 250_000;
 const FLASH_DAP_PROTOCOL_SWD = 1;
 const FLASH_DP_DPIDR = 0x0;
 const FLASH_CTRL_AP = 2 << 24;
@@ -97,6 +97,7 @@ const FLASH_PROGRESS_STEP = 16 * 1024;
 const FLASH_WRITE_BUFFER_LINES = 1;
 const FLASH_WRITE_CHUNK_BYTES = FLASH_WRITE_BUFFER_LINES * 16;
 const FLASH_WRITE_CONFIG = (FLASH_WRITE_BUFFER_LINES << 8) | 0x1;
+const FLASH_SMALL_SEGMENT_COMMIT_BYTES = 4096;
 const FLASH_MAX_LOG_LINES = 240;
 const BLE_STATUS_PATTERN = /Link status:\s*\{BLE:\s*(Up|Down),\s*FSK:\s*(Up|Down),\s*LoRa:\s*(Up|Down)\}/g;
 const BLE_WORKFLOWS = {
@@ -787,6 +788,17 @@ async function waitFlashReady(dap) {
   await waitForCondition(async () => (await dap.readMem32(FLASH_RRAMC_READY)) === 1, 10_000);
 }
 
+async function configureRramWriteMode(dap) {
+  await dap.writeMem32(FLASH_RRAMC_CONFIG, FLASH_WRITE_CONFIG);
+  await waitFlashReady(dap);
+  flashLogMessage(`RRAMC configured ${flashFormatHex(FLASH_WRITE_CONFIG)}`);
+}
+
+function isDataViewBoundsError(error) {
+  const message = error && error.message ? error.message : String(error);
+  return message.includes("outside the bounds of the DataView");
+}
+
 async function writePartialWords(dap, address, data) {
   let offset = 0;
 
@@ -884,6 +896,7 @@ async function readFlashBytes(dap, address, length) {
 async function writeRramChunks(dap, segment, progress) {
   const chunkSize = FLASH_WRITE_CHUNK_BYTES;
   const data = segment.data;
+  const commitEveryChunk = data.length <= FLASH_SMALL_SEGMENT_COMMIT_BYTES;
 
   await waitFlashReady(dap);
   for (let offset = 0; offset < data.length; offset += chunkSize) {
@@ -897,8 +910,9 @@ async function writeRramChunks(dap, segment, progress) {
       throw new Error(`Program failed at ${flashFormatHex(address)} (${chunk.length} bytes): ${message}`);
     }
 
-    if (chunk.length !== chunkSize) {
+    if (commitEveryChunk || chunk.length !== chunkSize) {
       await dap.writeMem32(FLASH_RRAMC_COMMITWRITEBUF, 1);
+      await waitFlashReady(dap);
     }
 
     progress(chunk.length);
@@ -908,6 +922,32 @@ async function writeRramChunks(dap, segment, progress) {
   await waitFlashReady(dap);
 }
 
+async function reconnectFlashDapForRetry() {
+  flashLogMessage("Reconnecting probe after short CMSIS-DAP response");
+  await closeFlashSession();
+  const dap = await getFlashDap();
+  await dap.halt();
+  flashLogMessage("Core halted after reconnect");
+  await configureRramWriteMode(dap);
+  return dap;
+}
+
+async function programSegmentWithRetry(dap, segment, progress) {
+  try {
+    await writeRramChunks(dap, segment, progress);
+    return dap;
+  } catch (error) {
+    if (!isDataViewBoundsError(error)) {
+      throw error;
+    }
+
+    flashLogMessage(`Retrying program segment at ${flashFormatHex(segment.address)} after: ${error.message || error}`);
+    const retryDap = await reconnectFlashDapForRetry();
+    await writeRramChunks(retryDap, segment, progress);
+    return retryDap;
+  }
+}
+
 async function verifyFlashSegment(dap, segment, progress) {
   const chunkSize = FLASH_WRITE_CHUNK_BYTES;
   const data = segment.data;
@@ -915,7 +955,14 @@ async function verifyFlashSegment(dap, segment, progress) {
   for (let offset = 0; offset < data.length; offset += chunkSize) {
     const chunk = data.subarray(offset, Math.min(offset + chunkSize, data.length));
     const address = segment.address + offset;
-    const actual = await readFlashBytes(dap, address, chunk.length);
+    let actual;
+
+    try {
+      actual = await readFlashBytes(dap, address, chunk.length);
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      throw new Error(`Verify read failed at ${flashFormatHex(address)} (${chunk.length} bytes): ${message}`);
+    }
 
     for (let idx = 0; idx < chunk.length; idx += 1) {
       if (actual[idx] !== chunk[idx]) {
@@ -929,12 +976,28 @@ async function verifyFlashSegment(dap, segment, progress) {
   }
 }
 
+async function verifySegmentWithRetry(dap, segment, progress) {
+  try {
+    await verifyFlashSegment(dap, segment, progress);
+    return dap;
+  } catch (error) {
+    if (!isDataViewBoundsError(error)) {
+      throw error;
+    }
+
+    flashLogMessage(`Retrying verify segment at ${flashFormatHex(segment.address)} after: ${error.message || error}`);
+    const retryDap = await reconnectFlashDapForRetry();
+    await verifyFlashSegment(retryDap, segment, progress);
+    return retryDap;
+  }
+}
+
 function makeFlashProgressLogger(label, totalBytes) {
   let completed = 0;
   let lastPrinted = 0;
 
   return (delta) => {
-    completed += delta;
+    completed = Math.min(completed + delta, totalBytes);
     if ((completed - lastPrinted) < FLASH_PROGRESS_STEP && completed !== totalBytes) {
       return;
     }
@@ -1157,10 +1220,14 @@ async function flashSelectedFirmware() {
     const hexText = await file.text();
     const segments = parseIntelHex(hexText);
     const totalBytes = segments.reduce((sum, segment) => sum + segment.data.length, 0);
-    const dap = await getFlashDap();
+    let dap = await getFlashDap();
 
     flashLogMessage(`Segments ${segments.length}`);
     flashLogMessage(`Total bytes ${totalBytes}`);
+    flashLogMessage(`SWD clock ${FLASH_SWD_CLOCK_HZ} Hz`);
+    segments.forEach((segment, index) => {
+      flashLogMessage(`Segment ${index + 1}: ${segment.data.length} bytes at ${flashFormatHex(segment.address)}`);
+    });
 
     const dpidr = await dap.readDP(FLASH_DP_DPIDR);
     flashLogMessage(`DPIDR ${flashFormatHex(dpidr)}`);
@@ -1168,14 +1235,12 @@ async function flashSelectedFirmware() {
     await dap.halt();
     flashLogMessage("Core halted");
 
-    await dap.writeMem32(FLASH_RRAMC_CONFIG, FLASH_WRITE_CONFIG);
-    await waitFlashReady(dap);
-    flashLogMessage(`RRAMC configured ${flashFormatHex(FLASH_WRITE_CONFIG)}`);
+    await configureRramWriteMode(dap);
 
     const reportProgram = makeFlashProgressLogger("program", totalBytes);
     for (const segment of segments) {
       flashLogMessage(`Programming ${segment.data.length} bytes at ${flashFormatHex(segment.address)}`);
-      await writeRramChunks(dap, segment, reportProgram);
+      dap = await programSegmentWithRetry(dap, segment, reportProgram);
     }
 
     await dap.writeMem32(FLASH_RRAMC_CONFIG, 0);
@@ -1184,7 +1249,7 @@ async function flashSelectedFirmware() {
     const reportVerify = makeFlashProgressLogger("verify", totalBytes);
     for (const segment of segments) {
       flashLogMessage(`Verifying ${segment.data.length} bytes at ${flashFormatHex(segment.address)}`);
-      await verifyFlashSegment(dap, segment, reportVerify);
+      dap = await verifySegmentWithRetry(dap, segment, reportVerify);
     }
 
     await dap.writeMem32(FLASH_AIRCR, FLASH_AIRCR_VECTKEY | FLASH_AIRCR_SYSRESETREQ);
