@@ -5,7 +5,7 @@
   window.DEMO_CONFIG = {{ page_config | tojson }};
 </script>
 <script defer src="{{ url_for('static', filename='vendor/dap.umd.js', v='20260423webusb') }}"></script>
-<script defer src="{{ url_for('static', filename='app.js', v='20260423firmware') }}"></script>
+<script defer src="{{ url_for('static', filename='app.js', v='20260512sidflow') }}"></script>
 {% endblock %}
 {% block body %}
 <main class="page-shell">
@@ -124,6 +124,81 @@
           <button id="ble-disconnect" type="button" class="ghost-button">Disconnect</button>
         </div>
         <p id="ble-status" class="muted">Disconnected</p>
+        <div class="stack">
+          <div>
+            <div class="inline-actions inline-actions--triple">
+              <button type="button" class="js-link-workflow" data-workflow="ble">sid flow send ble</button>
+              <button type="button" class="js-link-workflow" data-workflow="fsk">sid flow send fsk</button>
+              <button type="button" class="js-link-workflow" data-workflow="lora">sid flow send lora</button>
+            </div>
+            <div class="inline-actions">
+              <button type="button" class="js-shell-command ghost-button" data-command="sid flow connect">sid flow connect</button>
+              <button type="button" class="js-shell-command ghost-button" data-command="sid flow status">sid flow status</button>
+              <button type="button" class="js-shell-command ghost-button" data-command="sid flow cancel">sid flow cancel</button>
+              <button type="button" class="js-shell-command ghost-button" data-command="sid last_status">sid last_status</button>
+            </div>
+            <p id="ble-workflow-status" class="muted"></p>
+          </div>
+
+          <form id="ble-payload-form" class="stack">
+            <label>
+              <span>Payload</span>
+              <textarea
+                id="ble-payload"
+                rows="3"
+                placeholder="Hello from the Web BLE console"></textarea>
+            </label>
+            <div class="inline-fields inline-fields--triple">
+              <label>
+                <span>Link</span>
+                <select id="ble-send-link">
+                  <option value="1">BLE</option>
+                  <option value="2">FSK</option>
+                  <option value="3">LoRa</option>
+                  <option value="8" selected>Any</option>
+                </select>
+              </label>
+              <label>
+                <span>Route</span>
+                <select id="ble-link-mode">
+                  <option value="1">Cloud</option>
+                  <option value="2">Mobile</option>
+                </select>
+              </label>
+              <label>
+                <span>Type</span>
+                <select id="ble-message-type">
+                  <option value="2">Notify</option>
+                  <option value="0">Get</option>
+                  <option value="1">Set</option>
+                  <option value="3">Response</option>
+                </select>
+              </label>
+            </div>
+            <div class="inline-fields">
+              <label>
+                <span>Encoding</span>
+                <select id="ble-payload-encoding">
+                  <option value="text">UTF-8 Text</option>
+                  <option value="hex">Raw Hex</option>
+                </select>
+              </label>
+              <label>
+                <span>Preset</span>
+                <select id="ble-payload-preset">
+                  <option value="">Custom Payload</option>
+                  <option value="status">Request status</option>
+                  <option value="hello">Hello string</option>
+                  <option value="json">JSON sample</option>
+                </select>
+              </label>
+            </div>
+            <div class="inline-actions">
+              <button type="submit">Send Payload</button>
+              <button type="button" id="ble-copy-command" class="ghost-button">Copy Command to Shell</button>
+            </div>
+          </form>
+        </div>
         <div id="ble-terminal" class="terminal terminal-screen" aria-label="BLE shell output" role="log"></div>
         <form id="ble-command-form" class="command-row">
           <input
@@ -138,6 +213,15 @@
             spellcheck="false">
           <button type="submit">Send Command</button>
         </form>
+        <details class="console-secondary">
+          <summary>Advanced Shell</summary>
+          <div class="inline-actions">
+            <button type="button" class="js-shell-command ghost-button" data-command="sid init 7">Init All Links</button>
+            <button type="button" class="js-shell-command ghost-button" data-command="sid start">Start</button>
+            <button type="button" class="js-shell-command ghost-button" data-command="sid stop">Stop</button>
+            <button type="button" class="js-shell-command ghost-button" data-command="sid deinit">Deinit</button>
+          </div>
+        </details>
       </div>
     </article>
 

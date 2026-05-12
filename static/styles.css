@@ -581,6 +581,25 @@ button:active {
   justify-content: start;
 }
 
+.console-secondary {
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+}
+
+.console-secondary summary {
+  color: var(--ink-soft);
+  font-family: var(--sans-regular);
+  font-size: 0.88rem;
+  list-style-position: inside;
+  cursor: pointer;
+}
+
+.console-secondary[open] {
+  display: grid;
+  gap: 0.9rem;
+}
+
 .flash-source-grid {
   align-items: end;
 }
@@ -853,6 +872,20 @@ select:focus {
 
 .table-actions form {
   margin: 0;
+}
+
+.assign-form {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1fr) auto;
+  gap: 0.45rem;
+  min-width: 16rem;
+}
+
+.assign-form select,
+.assign-form button {
+  min-width: 0;
+  min-height: 2.55rem;
+  font-size: 0.95rem;
 }
 
 .table-actions button,

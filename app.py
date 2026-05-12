@@ -427,6 +427,36 @@ def refresh_device(device_id: int):
     return redirect(url_for("admin"))
 
 
+@app.post("/admin/devices/<int:device_id>/assign")
+@admin_required
+def assign_device(device_id: int):
+    device = store.get_device(device_id)
+    if device is None:
+        flash("Device not found.", "error")
+        return redirect(url_for("admin"))
+
+    customer_user_id = request.form.get("customer_user_id", "").strip()
+    customer_id = None
+    customer_label = "Unassigned"
+
+    if customer_user_id:
+        try:
+            customer_id = int(customer_user_id)
+        except ValueError:
+            flash("Select a valid customer.", "error")
+            return redirect(url_for("admin"))
+
+        customer = store.get_user(customer_id)
+        if customer is None or customer["role"] != "customer":
+            flash("Select a valid customer.", "error")
+            return redirect(url_for("admin"))
+        customer_label = customer.get("display_name") or customer["email"]
+
+    store.update_device_customer(device_id, customer_id)
+    flash(f"Assigned {device['name']} to {customer_label}.", "success")
+    return redirect(url_for("admin"))
+
+
 def _json_download(payload: dict, filename: str) -> Response:
     return Response(
         json.dumps(payload, indent=2),

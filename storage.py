@@ -321,6 +321,18 @@ class DemoStore:
                 ),
             )
 
+    def update_device_customer(self, device_id: int, customer_user_id: int | None) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE devices
+                SET customer_user_id = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (customer_user_id, utc_now_iso(), device_id),
+            )
+
     def unique_uplink_topics(self) -> list[str]:
         with self.connect() as conn:
             rows = conn.execute(

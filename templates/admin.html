@@ -242,7 +242,19 @@
             {% for device in devices %}
             <tr>
               <td>{{ device.name }}</td>
-              <td>{{ device.customer_name or "Unassigned" }}</td>
+              <td>
+                <form method="post" action="{{ url_for('assign_device', device_id=device.id) }}" class="assign-form">
+                  <select name="customer_user_id" aria-label="Assign {{ device.name }} to customer">
+                    <option value="">Unassigned</option>
+                    {% for customer in customers %}
+                    <option value="{{ customer.id }}" {% if device.customer_user_id == customer.id %}selected{% endif %}>
+                      {{ customer.display_name or customer.email }}
+                    </option>
+                    {% endfor %}
+                  </select>
+                  <button type="submit">Assign</button>
+                </form>
+              </td>
               <td><code>{{ device.wireless_device_id }}</code></td>
               <td><code>{{ device.uplink_topic or "-" }}</code></td>
               <td><code>{{ device.device_profile_id or "-" }}</code></td>
