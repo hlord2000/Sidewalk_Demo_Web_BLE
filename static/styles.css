@@ -878,14 +878,23 @@ select:focus {
   display: grid;
   grid-template-columns: minmax(9rem, 1fr) auto;
   gap: 0.45rem;
-  min-width: 16rem;
+  align-items: start;
+  min-width: 18rem;
 }
 
 .assign-form select,
 .assign-form button {
   min-width: 0;
-  min-height: 2.55rem;
   font-size: 0.95rem;
+}
+
+.assign-form button {
+  min-height: 2.55rem;
+}
+
+.assignment-summary {
+  margin-top: 0.4rem;
+  font-size: 0.82rem;
 }
 
 .table-actions button,

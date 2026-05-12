@@ -74,6 +74,21 @@ class DemoStore:
                     device_profile_json TEXT,
                     provisioning_json TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS device_customer_access (
+                    device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+                    customer_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (device_id, customer_user_id)
+                );
+                """
+            )
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO device_customer_access (device_id, customer_user_id, created_at)
+                SELECT id, customer_user_id, created_at
+                FROM devices
+                WHERE customer_user_id IS NOT NULL
                 """
             )
 
@@ -182,9 +197,9 @@ class DemoStore:
             rows = conn.execute(
                 """
                 SELECT u.*,
-                       COUNT(d.id) AS device_count
+                       COUNT(dca.device_id) AS device_count
                 FROM users u
-                LEFT JOIN devices d ON d.customer_user_id = u.id
+                LEFT JOIN device_customer_access dca ON dca.customer_user_id = u.id
                 WHERE u.role = 'customer'
                 GROUP BY u.id
                 ORDER BY u.created_at DESC
@@ -197,20 +212,31 @@ class DemoStore:
             if user["role"] == "admin":
                 rows = conn.execute(
                     """
-                    SELECT d.*, u.email AS customer_email, u.display_name AS customer_name
+                    SELECT d.*,
+                           GROUP_CONCAT(u.email, ', ') AS customer_email,
+                           GROUP_CONCAT(COALESCE(u.display_name, u.email), ', ') AS customer_name,
+                           GROUP_CONCAT(u.id) AS customer_ids
                     FROM devices d
-                    LEFT JOIN users u ON u.id = d.customer_user_id
+                    LEFT JOIN device_customer_access dca ON dca.device_id = d.id
+                    LEFT JOIN users u ON u.id = dca.customer_user_id
                     WHERE d.active = 1
+                    GROUP BY d.id
                     ORDER BY d.created_at DESC
                     """
                 ).fetchall()
             else:
                 rows = conn.execute(
                     """
-                    SELECT d.*, u.email AS customer_email, u.display_name AS customer_name
+                    SELECT d.*,
+                           GROUP_CONCAT(u.email, ', ') AS customer_email,
+                           GROUP_CONCAT(COALESCE(u.display_name, u.email), ', ') AS customer_name,
+                           GROUP_CONCAT(u.id) AS customer_ids
                     FROM devices d
-                    LEFT JOIN users u ON u.id = d.customer_user_id
-                    WHERE d.active = 1 AND d.customer_user_id = ?
+                    JOIN device_customer_access allowed ON allowed.device_id = d.id
+                    LEFT JOIN device_customer_access dca ON dca.device_id = d.id
+                    LEFT JOIN users u ON u.id = dca.customer_user_id
+                    WHERE d.active = 1 AND allowed.customer_user_id = ?
+                    GROUP BY d.id
                     ORDER BY d.created_at DESC
                     """,
                     (user["id"],),
@@ -221,9 +247,14 @@ class DemoStore:
         with self.connect() as conn:
             rows = conn.execute(
                 """
-                SELECT d.*, u.email AS customer_email, u.display_name AS customer_name
+                SELECT d.*,
+                       GROUP_CONCAT(u.email, ', ') AS customer_email,
+                       GROUP_CONCAT(COALESCE(u.display_name, u.email), ', ') AS customer_name,
+                       GROUP_CONCAT(u.id) AS customer_ids
                 FROM devices d
-                LEFT JOIN users u ON u.id = d.customer_user_id
+                LEFT JOIN device_customer_access dca ON dca.device_id = d.id
+                LEFT JOIN users u ON u.id = dca.customer_user_id
+                GROUP BY d.id
                 ORDER BY d.created_at DESC
                 """
             ).fetchall()
@@ -233,10 +264,15 @@ class DemoStore:
         with self.connect() as conn:
             row = conn.execute(
                 """
-                SELECT d.*, u.email AS customer_email, u.display_name AS customer_name
+                SELECT d.*,
+                       GROUP_CONCAT(u.email, ', ') AS customer_email,
+                       GROUP_CONCAT(COALESCE(u.display_name, u.email), ', ') AS customer_name,
+                       GROUP_CONCAT(u.id) AS customer_ids
                 FROM devices d
-                LEFT JOIN users u ON u.id = d.customer_user_id
+                LEFT JOIN device_customer_access dca ON dca.device_id = d.id
+                LEFT JOIN users u ON u.id = dca.customer_user_id
                 WHERE d.id = ?
+                GROUP BY d.id
                 """,
                 (device_id,),
             ).fetchone()
@@ -246,7 +282,7 @@ class DemoStore:
         device = self.get_device(device_id)
         if device is None:
             return None
-        if user["role"] == "admin" or device["customer_user_id"] == user["id"]:
+        if user["role"] == "admin" or user["id"] in device.get("customer_ids", []):
             return device
         return None
 
@@ -291,6 +327,14 @@ class DemoStore:
                     json.dumps(provisioning_json) if provisioning_json else None,
                 ),
             )
+            if customer_user_id is not None:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO device_customer_access (device_id, customer_user_id, created_at)
+                    VALUES (?, ?, ?)
+                    """,
+                    (cursor.lastrowid, customer_user_id, now),
+                )
             row = conn.execute("SELECT * FROM devices WHERE id = ?", (cursor.lastrowid,)).fetchone()
             return self._decode_device_row(row)
 
@@ -321,8 +365,18 @@ class DemoStore:
                 ),
             )
 
-    def update_device_customer(self, device_id: int, customer_user_id: int | None) -> None:
+    def update_device_customers(self, device_id: int, customer_user_ids: list[int]) -> None:
         with self.connect() as conn:
+            now = utc_now_iso()
+            unique_customer_ids = list(dict.fromkeys(customer_user_ids))
+            conn.execute("DELETE FROM device_customer_access WHERE device_id = ?", (device_id,))
+            conn.executemany(
+                """
+                INSERT INTO device_customer_access (device_id, customer_user_id, created_at)
+                VALUES (?, ?, ?)
+                """,
+                [(device_id, customer_id, now) for customer_id in unique_customer_ids],
+            )
             conn.execute(
                 """
                 UPDATE devices
@@ -330,7 +384,7 @@ class DemoStore:
                     updated_at = ?
                 WHERE id = ?
                 """,
-                (customer_user_id, utc_now_iso(), device_id),
+                (unique_customer_ids[0] if unique_customer_ids else None, now, device_id),
             )
 
     def unique_uplink_topics(self) -> list[str]:
@@ -347,4 +401,6 @@ class DemoStore:
         for key in ("wireless_device_json", "device_profile_json", "provisioning_json"):
             value = item.get(key)
             item[key] = json.loads(value) if value else None
+        customer_ids = item.get("customer_ids")
+        item["customer_ids"] = [int(value) for value in customer_ids.split(",")] if customer_ids else []
         return item

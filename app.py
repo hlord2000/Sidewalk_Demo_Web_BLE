@@ -435,11 +435,11 @@ def assign_device(device_id: int):
         flash("Device not found.", "error")
         return redirect(url_for("admin"))
 
-    customer_user_id = request.form.get("customer_user_id", "").strip()
-    customer_id = None
-    customer_label = "Unassigned"
+    customer_user_ids = request.form.getlist("customer_user_ids")
+    customer_ids = []
+    customer_labels = []
 
-    if customer_user_id:
+    for customer_user_id in customer_user_ids:
         try:
             customer_id = int(customer_user_id)
         except ValueError:
@@ -450,9 +450,11 @@ def assign_device(device_id: int):
         if customer is None or customer["role"] != "customer":
             flash("Select a valid customer.", "error")
             return redirect(url_for("admin"))
-        customer_label = customer.get("display_name") or customer["email"]
+        customer_ids.append(customer_id)
+        customer_labels.append(customer.get("display_name") or customer["email"])
 
-    store.update_device_customer(device_id, customer_id)
+    store.update_device_customers(device_id, customer_ids)
+    customer_label = ", ".join(customer_labels) if customer_labels else "no customers"
     flash(f"Assigned {device['name']} to {customer_label}.", "success")
     return redirect(url_for("admin"))
 

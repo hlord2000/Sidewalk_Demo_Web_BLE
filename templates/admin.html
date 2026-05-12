@@ -231,7 +231,7 @@
           <thead>
             <tr>
               <th>Name</th>
-              <th>Customer</th>
+              <th>Customers</th>
               <th>Wireless Device ID</th>
               <th>Topic</th>
               <th>Profile</th>
@@ -244,16 +244,16 @@
               <td>{{ device.name }}</td>
               <td>
                 <form method="post" action="{{ url_for('assign_device', device_id=device.id) }}" class="assign-form">
-                  <select name="customer_user_id" aria-label="Assign {{ device.name }} to customer">
-                    <option value="">Unassigned</option>
+                  <select name="customer_user_ids" aria-label="Assign {{ device.name }} to customers" multiple size="4">
                     {% for customer in customers %}
-                    <option value="{{ customer.id }}" {% if device.customer_user_id == customer.id %}selected{% endif %}>
+                    <option value="{{ customer.id }}" {% if customer.id in device.customer_ids %}selected{% endif %}>
                       {{ customer.display_name or customer.email }}
                     </option>
                     {% endfor %}
                   </select>
-                  <button type="submit">Assign</button>
+                  <button type="submit">Save</button>
                 </form>
+                <p class="muted assignment-summary">{{ device.customer_name or "No customer access" }}</p>
               </td>
               <td><code>{{ device.wireless_device_id }}</code></td>
               <td><code>{{ device.uplink_topic or "-" }}</code></td>
