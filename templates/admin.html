@@ -84,6 +84,10 @@
           <span>Notes</span>
           <textarea name="notes" rows="3" placeholder="Project, site, or account notes"></textarea>
         </label>
+        <label class="checkbox-row">
+          <input type="checkbox" name="can_provision" value="1">
+          <span>Allow this account to provision assigned devices into firmware images</span>
+        </label>
         <button type="submit">Create Customer</button>
       </form>
     </article>
@@ -199,6 +203,7 @@
               <th>Name</th>
               <th>Email</th>
               <th>Devices</th>
+              <th>Provisioning</th>
               <th>Created</th>
               <th>Last Login</th>
             </tr>
@@ -209,11 +214,20 @@
               <td>{{ customer.display_name or customer.email }}</td>
               <td><code>{{ customer.email }}</code></td>
               <td>{{ customer.device_count }}</td>
+              <td>
+                <form method="post" action="{{ url_for('update_customer_permissions', customer_id=customer.id) }}" class="assign-form">
+                  <label class="checkbox-row">
+                    <input type="checkbox" name="can_provision" value="1" {% if customer.can_provision %}checked{% endif %}>
+                    <span>Allowed</span>
+                  </label>
+                  <button type="submit">Save</button>
+                </form>
+              </td>
               <td>{{ customer.created_at }}</td>
               <td>{{ customer.last_login_at or "Never" }}</td>
             </tr>
             {% else %}
-            <tr><td colspan="5">No customers yet.</td></tr>
+            <tr><td colspan="6">No customers yet.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -266,6 +280,8 @@
                   <a class="link-button" href="{{ url_for('download_certificate_json', device_id=device.id) }}">certificate.json</a>
                   <a class="link-button" href="{{ url_for('download_wireless_device_json', device_id=device.id) }}">wireless_device.json</a>
                   <a class="link-button" href="{{ url_for('download_device_profile_json', device_id=device.id) }}">device_profile.json</a>
+                  <a class="link-button" href="{{ url_for('download_mfg_bin', device_id=device.id) }}">mfg.bin</a>
+                  <a class="link-button" href="{{ url_for('download_mfg_hex', device_id=device.id) }}">mfg.hex</a>
                 </div>
               </td>
             </tr>

@@ -99,7 +99,13 @@ def build_provisioning_json(
     sidewalk_device = wireless_device_json.get("Sidewalk", {})
     sidewalk_profile = device_profile_json.get("Sidewalk", {})
     device_type_id = ""
-    for cert_meta in sidewalk_profile.get("DAKCertificateMetadata", []) or []:
+    cert_metadata = (
+        sidewalk_profile.get("DakCertificateMetadata")
+        or sidewalk_profile.get("DAKCertificateMetadata")
+        or sidewalk_profile.get("DAKCertificate")
+        or []
+    )
+    for cert_meta in cert_metadata:
         device_type_id = cert_meta.get("DeviceTypeId", "")
         if device_type_id:
             break

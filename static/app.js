@@ -32,6 +32,7 @@ const bleWorkflowStatus = document.getElementById("ble-workflow-status");
 const eventFeedStatus = document.getElementById("event-feed-status");
 const flashFileInput = document.getElementById("flash-file");
 const flashPresetSelect = document.getElementById("flash-preset");
+const flashProvisionInput = document.getElementById("flash-provision");
 const flashConnectButton = document.getElementById("flash-connect");
 const flashDisconnectButton = document.getElementById("flash-disconnect");
 const flashButton = document.getElementById("flash-button");
@@ -534,6 +535,7 @@ let flashDap = null;
 let flashBusy = false;
 let flashLogLines = [];
 let flashPresetFile = null;
+let flashPresetProvisioning = null;
 
 function flashCurrentFile() {
   if (flashFileInput && flashFileInput.files && flashFileInput.files[0]) {
@@ -595,6 +597,9 @@ function flashCurrentImageSummary() {
   }
 
   if (flashPresetFile && file === flashPresetFile) {
+    if (flashPresetProvisioning && flashPresetProvisioning.deviceName) {
+      return `Provisioned image: ${flashPresetProvisioning.imageName} for ${flashPresetProvisioning.deviceName}`;
+    }
     return `Built-in image: ${file.name}`;
   }
 
@@ -625,6 +630,10 @@ function updateFlashUi() {
 
   if (flashPresetSelect) {
     flashPresetSelect.disabled = flashBusy || firmwareImages.length === 0;
+  }
+
+  if (flashProvisionInput) {
+    flashProvisionInput.disabled = flashBusy || !config.canProvisionFirmware || firmwareImages.length === 0;
   }
 
   if (flashConnectButton) {
@@ -936,9 +945,21 @@ function makeFlashFile(name, text) {
 
 function clearFlashPreset({ resetSelect = false } = {}) {
   flashPresetFile = null;
+  flashPresetProvisioning = null;
   if (resetSelect && flashPresetSelect) {
     flashPresetSelect.value = "";
   }
+}
+
+function shouldProvisionFlashPreset() {
+  return !!(flashProvisionInput && flashProvisionInput.checked && config.canProvisionFirmware);
+}
+
+function safeFirmwareFilenamePart(value) {
+  return String(value || "device")
+    .trim()
+    .replace(/[^A-Za-z0-9_.-]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "device";
 }
 
 async function ensureFlashDeviceSelected() {
@@ -1017,21 +1038,51 @@ async function loadFlashPreset(imageId) {
 
   flashBusy = true;
   updateFlashUi();
-  setFlashStatus(`Loading built-in image ${image.name}...`);
+  const provisionDevice = shouldProvisionFlashPreset() ? currentDevice() : null;
+  if (shouldProvisionFlashPreset() && !provisionDevice) {
+    flashBusy = false;
+    updateFlashUi();
+    throw new Error("Select a tracked AWS device before provisioning a bundled image");
+  }
+
+  const firmwareUrl = new URL(image.downloadUrl, window.location.origin);
+  let filename = image.name;
+  if (provisionDevice) {
+    firmwareUrl.searchParams.set("provision", "1");
+    firmwareUrl.searchParams.set("device_id", provisionDevice.id);
+    filename = `${safeFirmwareFilenamePart(provisionDevice.name)}-${image.name}`;
+  }
+
+  setFlashStatus(provisionDevice
+    ? `Building provisioned image ${image.name} for ${provisionDevice.name}...`
+    : `Loading built-in image ${image.name}...`);
 
   try {
-    const response = await fetch(image.downloadUrl, { credentials: "same-origin" });
+    const response = await fetch(firmwareUrl.toString(), { credentials: "same-origin" });
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status} while loading ${image.name}`);
+      let detail = `HTTP ${response.status}`;
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const body = await response.json().catch(() => null);
+        if (body && body.error) {
+          detail = body.error;
+        }
+      }
+      throw new Error(`${detail} while loading ${image.name}`);
     }
 
     const hexText = await response.text();
-    flashPresetFile = makeFlashFile(image.name, hexText);
+    flashPresetFile = makeFlashFile(filename, hexText);
+    flashPresetProvisioning = provisionDevice
+      ? { imageName: image.name, deviceName: provisionDevice.name }
+      : null;
     if (flashFileInput) {
       flashFileInput.value = "";
     }
-    flashLogMessage(`Loaded built-in image ${image.name}`);
-    setFlashStatus(`Ready to flash ${image.name}`);
+    flashLogMessage(provisionDevice
+      ? `Loaded provisioned image ${image.name} for ${provisionDevice.name}`
+      : `Loaded built-in image ${image.name}`);
+    setFlashStatus(`Ready to flash ${filename}`);
   } finally {
     flashBusy = false;
     updateFlashUi();
@@ -1673,9 +1724,20 @@ if (blePayloadInput && !blePayloadInput.value) {
 }
 
 if (deviceSelector) {
-  deviceSelector.addEventListener("change", () => {
+  deviceSelector.addEventListener("change", async () => {
     updateSelectedDeviceUi();
     connectEventStream();
+    if (flashProvisionInput && flashProvisionInput.checked && flashPresetSelect && flashPresetSelect.value) {
+      try {
+        await loadFlashPreset(flashPresetSelect.value);
+      } catch (error) {
+        const message = error.message || String(error);
+        clearFlashPreset();
+        setFlashStatus(`Preset load failed: ${message}`);
+        flashLogMessage(`Preset load failed: ${message}`);
+        updateFlashUi();
+      }
+    }
   });
 }
 
@@ -1752,6 +1814,28 @@ if (flashFileInput) {
     const file = flashCurrentFile();
     setFlashStatus(file ? `Ready to flash ${file.name}` : "Ready");
     updateFlashUi();
+  });
+}
+
+if (flashProvisionInput) {
+  flashProvisionInput.addEventListener("change", async () => {
+    if (!flashPresetSelect || !flashPresetSelect.value) {
+      updateFlashUi();
+      setFlashStatus(flashProvisionInput.checked
+        ? "Choose a bundled firmware image to provision the selected device"
+        : "Ready");
+      return;
+    }
+
+    try {
+      await loadFlashPreset(flashPresetSelect.value);
+    } catch (error) {
+      const message = error.message || String(error);
+      clearFlashPreset();
+      setFlashStatus(`Preset load failed: ${message}`);
+      flashLogMessage(`Preset load failed: ${message}`);
+      updateFlashUi();
+    }
   });
 }
 

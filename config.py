@@ -28,6 +28,13 @@ def _int_env(name: str, default: int) -> int:
     return int(value)
 
 
+def _auto_int_env(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value in (None, ""):
+        return default
+    return int(value, 0)
+
+
 def _bool_env(name: str, default: bool) -> bool:
     value = os.getenv(name)
     if value in (None, ""):
@@ -56,6 +63,7 @@ class DemoConfig:
         "REPLACE_SIDEWALK_WIRELESS_DEVICE_ID",
     )
     SIDEWALK_DOWNLINK_ACK_RETRY_SECS = _int_env("SIDEWALK_DOWNLINK_ACK_RETRY_SECS", 10)
+    SIDEWALK_MFG_STORAGE_ADDRESS = _auto_int_env("SIDEWALK_MFG_STORAGE_ADDRESS", 0x162000)
 
     MQTT_CLIENT_ID = _env("MQTT_CLIENT_ID", "sidewalk-web-demo")
     EVENT_BACKLOG_SIZE = _int_env("EVENT_BACKLOG_SIZE", 64)

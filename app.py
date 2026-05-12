@@ -26,6 +26,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import DemoConfig
 from iot import DownlinkRequest, EventBroker, SidewalkCloudService
+from provisioning import ProvisioningError, build_sidewalk_mfg_bin, bytes_to_ihex, merge_ihex
 from storage import DemoStore
 
 
@@ -95,6 +96,10 @@ def current_user() -> dict | None:
     if not user_id:
         return None
     return store.get_user(int(user_id))
+
+
+def _can_provision_firmware(user: dict) -> bool:
+    return user["role"] == "admin" or bool(user.get("can_provision"))
 
 
 def _device_summary(device: dict) -> dict:
@@ -182,6 +187,18 @@ def _load_or_refresh_artifacts(device: dict) -> tuple[dict, dict, dict]:
     return wireless_device_json, device_profile_json, provisioning_json
 
 
+def _mfg_hex_for_device(device: dict) -> str:
+    wireless_device_json, device_profile_json, _ = _load_or_refresh_artifacts(device)
+    mfg_bin = build_sidewalk_mfg_bin(wireless_device_json, device_profile_json)
+    return bytes_to_ihex(mfg_bin, DemoConfig.SIDEWALK_MFG_STORAGE_ADDRESS)
+
+
+def _download_filename(*parts: str) -> str:
+    raw = "-".join(part for part in parts if part)
+    filename = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in raw)
+    return filename.strip("_") or "download"
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if session.get("user_id"):
@@ -243,6 +260,8 @@ def dashboard():
         "nusTxUuid": DemoConfig.NUS_TX_UUID,
         "webShellNamePrefix": (selected_device or {}).get("ble_name_prefix", "XIAO-WebShell"),
         "adminUrl": url_for("admin") if user["role"] == "admin" else "",
+        "canProvisionFirmware": _can_provision_firmware(user),
+        "mfgStorageAddress": DemoConfig.SIDEWALK_MFG_STORAGE_ADDRESS,
         "firmwareImages": _available_firmware_images(),
     }
     return render_template("dashboard.html", page_config=page_config)
@@ -258,6 +277,38 @@ def firmware_image(image_id: str):
     path = entry["path"]
     if not path.is_file():
         abort(404)
+
+    if request.args.get("provision") == "1":
+        user = current_user()
+        assert user is not None
+        if not _can_provision_firmware(user):
+            abort(403)
+
+        try:
+            device_id = int(request.args.get("device_id", ""))
+        except ValueError:
+            abort(400)
+
+        device = store.get_device_for_user(user, device_id)
+        if device is None:
+            abort(404)
+
+        try:
+            base_hex = path.read_text(encoding="utf-8")
+            mfg_hex = _mfg_hex_for_device(device)
+            provisioned_hex = merge_ihex(base_hex, mfg_hex)
+        except ProvisioningError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        except Exception as exc:
+            LOGGER.exception("Failed to build provisioned firmware")
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+        filename = _download_filename(device["name"], entry["name"])
+        return Response(
+            provisioned_hex,
+            mimetype="text/plain; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     return send_file(
         path,
@@ -290,18 +341,39 @@ def create_customer():
     password = request.form.get("password", "")
     display_name = request.form.get("display_name", "").strip()
     notes = request.form.get("notes", "").strip()
+    can_provision = request.form.get("can_provision") == "1"
 
     if not email or not password:
         flash("Customer email and password are required.", "error")
         return redirect(url_for("admin"))
 
     try:
-        customer = store.create_customer(email=email, password=password, display_name=display_name, notes=notes)
+        customer = store.create_customer(
+            email=email,
+            password=password,
+            display_name=display_name,
+            notes=notes,
+            can_provision=can_provision,
+        )
     except sqlite3.IntegrityError:
         flash("A customer with that email already exists.", "error")
         return redirect(url_for("admin"))
 
     flash(f"Created customer {customer['email']}.", "success")
+    return redirect(url_for("admin"))
+
+
+@app.post("/admin/customers/<int:customer_id>/permissions")
+@admin_required
+def update_customer_permissions(customer_id: int):
+    customer = store.get_user(customer_id)
+    if customer is None or customer["role"] != "customer":
+        flash("Customer not found.", "error")
+        return redirect(url_for("admin"))
+
+    can_provision = request.form.get("can_provision") == "1"
+    store.update_customer_permissions(customer_id, can_provision=can_provision)
+    flash(f"Updated permissions for {customer.get('display_name') or customer['email']}.", "success")
     return redirect(url_for("admin"))
 
 
@@ -425,6 +497,47 @@ def refresh_device(device_id: int):
 
     flash(f"Refreshed provisioning data for {device['name']}.", "success")
     return redirect(url_for("admin"))
+
+
+@app.get("/admin/devices/<int:device_id>/mfg.bin")
+@admin_required
+def download_mfg_bin(device_id: int):
+    device = store.get_device(device_id)
+    if device is None:
+        return jsonify({"ok": False, "error": "Device not found"}), 404
+    try:
+        wireless_device_json, device_profile_json, _ = _load_or_refresh_artifacts(device)
+        mfg_bin = build_sidewalk_mfg_bin(wireless_device_json, device_profile_json)
+    except ProvisioningError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        LOGGER.exception("Failed to build manufacturing binary")
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return Response(
+        mfg_bin,
+        mimetype="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{_download_filename(device["name"], "mfg.bin")}"'},
+    )
+
+
+@app.get("/admin/devices/<int:device_id>/mfg.hex")
+@admin_required
+def download_mfg_hex(device_id: int):
+    device = store.get_device(device_id)
+    if device is None:
+        return jsonify({"ok": False, "error": "Device not found"}), 404
+    try:
+        mfg_hex = _mfg_hex_for_device(device)
+    except ProvisioningError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        LOGGER.exception("Failed to build manufacturing hex")
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return Response(
+        mfg_hex,
+        mimetype="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{_download_filename(device["name"], "mfg.hex")}"'},
+    )
 
 
 @app.post("/admin/devices/<int:device_id>/assign")

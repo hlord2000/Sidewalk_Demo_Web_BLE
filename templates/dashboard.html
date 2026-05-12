@@ -5,7 +5,7 @@
   window.DEMO_CONFIG = {{ page_config | tojson }};
 </script>
 <script defer src="{{ url_for('static', filename='vendor/dap.umd.js', v='20260423webusb') }}"></script>
-<script defer src="{{ url_for('static', filename='app.js', v='20260512sidflow') }}"></script>
+<script defer src="{{ url_for('static', filename='app.js', v='20260512provision') }}"></script>
 {% endblock %}
 {% block body %}
 <main class="page-shell">
@@ -247,6 +247,12 @@
             <input id="flash-file" type="file" accept=".hex,.ihex,.txt,text/plain">
           </label>
         </div>
+        {% if page_config.canProvisionFirmware %}
+        <label class="checkbox-row">
+          <input id="flash-provision" type="checkbox">
+          <span>Provision selected AWS device into bundled firmware</span>
+        </label>
+        {% endif %}
         <p class="muted flash-note">Built-in images ship with this dashboard release. Choosing a custom file clears the bundled selection.</p>
         <div class="inline-actions">
           <button id="flash-connect" type="button">Choose Probe</button>

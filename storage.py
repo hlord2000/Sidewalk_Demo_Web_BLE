@@ -52,6 +52,7 @@ class DemoStore:
                     role TEXT NOT NULL CHECK(role IN ('admin', 'customer')),
                     display_name TEXT,
                     active INTEGER NOT NULL DEFAULT 1,
+                    can_provision INTEGER NOT NULL DEFAULT 0,
                     notes TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
                     last_login_at TEXT
@@ -91,6 +92,13 @@ class DemoStore:
                 WHERE customer_user_id IS NOT NULL
                 """
             )
+            self._ensure_column(conn, "users", "can_provision", "INTEGER NOT NULL DEFAULT 0")
+            conn.execute("UPDATE users SET can_provision = 1 WHERE role = 'admin'")
+
+    def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def seed_admin(self, email: str, password: str) -> None:
         if not email or not password or email.startswith("REPLACE_") or password.startswith("REPLACE_"):
@@ -102,17 +110,19 @@ class DemoStore:
             if row is None:
                 conn.execute(
                     """
-                    INSERT INTO users (email, password_hash, role, display_name, active, notes, created_at)
-                    VALUES (?, ?, 'admin', ?, 1, '', ?)
+                    INSERT INTO users (email, password_hash, role, display_name, active, can_provision, notes, created_at)
+                    VALUES (?, ?, 'admin', ?, 1, 1, '', ?)
                     """,
                     (email, password_hash, "Administrator", now),
                 )
                 return
             if not check_password_hash(row["password_hash"], password):
                 conn.execute(
-                    "UPDATE users SET password_hash = ?, active = 1 WHERE id = ?",
+                    "UPDATE users SET password_hash = ?, active = 1, can_provision = 1 WHERE id = ?",
                     (password_hash, row["id"]),
                 )
+            else:
+                conn.execute("UPDATE users SET active = 1, can_provision = 1 WHERE id = ?", (row["id"],))
 
     def seed_default_device(
         self,
@@ -178,19 +188,37 @@ class DemoStore:
             row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
             return dict(row) if row else None
 
-    def create_customer(self, email: str, password: str, display_name: str, notes: str) -> dict[str, Any]:
+    def create_customer(
+        self,
+        email: str,
+        password: str,
+        display_name: str,
+        notes: str,
+        can_provision: bool = False,
+    ) -> dict[str, Any]:
         now = utc_now_iso()
         password_hash = generate_password_hash(password)
         with self.connect() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO users (email, password_hash, role, display_name, active, notes, created_at)
-                VALUES (?, ?, 'customer', ?, 1, ?, ?)
+                INSERT INTO users (email, password_hash, role, display_name, active, can_provision, notes, created_at)
+                VALUES (?, ?, 'customer', ?, 1, ?, ?, ?)
                 """,
-                (email, password_hash, display_name or email, notes or "", now),
+                (email, password_hash, display_name or email, int(can_provision), notes or "", now),
             )
             row = conn.execute("SELECT * FROM users WHERE id = ?", (cursor.lastrowid,)).fetchone()
             return dict(row)
+
+    def update_customer_permissions(self, customer_user_id: int, *, can_provision: bool) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE users
+                SET can_provision = ?
+                WHERE id = ? AND role = 'customer'
+                """,
+                (int(can_provision), customer_user_id),
+            )
 
     def list_customers(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
