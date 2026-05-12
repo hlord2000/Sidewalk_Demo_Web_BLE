@@ -885,11 +885,18 @@ async function writeRramChunks(dap, segment, progress) {
   const chunkSize = FLASH_WRITE_CHUNK_BYTES;
   const data = segment.data;
 
+  await waitFlashReady(dap);
   for (let offset = 0; offset < data.length; offset += chunkSize) {
     const chunk = data.subarray(offset, Math.min(offset + chunkSize, data.length));
     const address = segment.address + offset;
 
-    await writeFlashBytes(dap, address, chunk);
+    try {
+      await writeFlashBytes(dap, address, chunk);
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      throw new Error(`Program failed at ${flashFormatHex(address)} (${chunk.length} bytes): ${message}`);
+    }
+
     if (chunk.length !== chunkSize) {
       await dap.writeMem32(FLASH_RRAMC_COMMITWRITEBUF, 1);
     }
@@ -897,6 +904,7 @@ async function writeRramChunks(dap, segment, progress) {
     progress(chunk.length);
   }
 
+  await dap.writeMem32(FLASH_RRAMC_COMMITWRITEBUF, 1);
   await waitFlashReady(dap);
 }
 
