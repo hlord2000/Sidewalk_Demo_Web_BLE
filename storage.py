@@ -256,18 +256,21 @@ class DemoStore:
                     """
                 ).fetchall()
             else:
+                # Customers must only ever see their own association with a
+                # device, never the other customers it is shared with. Join
+                # solely on the requesting user's access row so the customer
+                # name/email/id fields can never expose another customer.
                 rows = conn.execute(
                     """
                     SELECT d.*,
-                           GROUP_CONCAT(u.email, ', ') AS customer_email,
-                           GROUP_CONCAT(COALESCE(u.display_name, u.email), ', ') AS customer_name,
-                           GROUP_CONCAT(u.id) AS customer_ids
+                           u.email AS customer_email,
+                           COALESCE(u.display_name, u.email) AS customer_name,
+                           CAST(u.id AS TEXT) AS customer_ids
                     FROM devices d
-                    JOIN device_customer_access allowed ON allowed.device_id = d.id
-                    LEFT JOIN device_customer_access dca ON dca.device_id = d.id
-                    LEFT JOIN users u ON u.id = dca.customer_user_id
-                    WHERE d.active = 1 AND allowed.customer_user_id = ?
-                    GROUP BY d.id
+                    JOIN device_customer_access dca
+                      ON dca.device_id = d.id AND dca.customer_user_id = ?
+                    JOIN users u ON u.id = dca.customer_user_id
+                    WHERE d.active = 1
                     ORDER BY d.created_at DESC
                     """,
                     (user["id"],),

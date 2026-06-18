@@ -41,7 +41,7 @@
       <select id="device-selector" {% if not page_config.devices %}disabled{% endif %}>
         {% for device in page_config.devices %}
         <option value="{{ device.id }}" {% if device.id == page_config.selectedDeviceId %}selected{% endif %}>
-          {{ device.name }}{% if device.customerName %} · {{ device.customerName }}{% endif %}
+          {{ device.name }}{% if device.customerName and page_config.user.role == 'admin' %} · {{ device.customerName }}{% endif %}
         </option>
         {% else %}
         <option value="">No devices assigned</option>
