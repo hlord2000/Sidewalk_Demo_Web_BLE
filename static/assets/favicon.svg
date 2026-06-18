@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Sidewalk Demo">
+  <rect width="48" height="48" rx="10" fill="#28333b"/>
+  <circle cx="24" cy="24" r="4.6" fill="#00a9ce"/>
+  <path d="M15.2 15.2a12.4 12.4 0 0 0 0 17.6" stroke="#00a9ce" stroke-width="3" stroke-linecap="round" fill="none"/>
+  <path d="M32.8 15.2a12.4 12.4 0 0 1 0 17.6" stroke="#00a9ce" stroke-width="3" stroke-linecap="round" fill="none"/>
+  <path d="M9 9a21.2 21.2 0 0 0 0 30" stroke="#00a9ce" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.4"/>
+  <path d="M39 9a21.2 21.2 0 0 1 0 30" stroke="#00a9ce" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.4"/>
+</svg>
