@@ -5,7 +5,7 @@ import logging
 import os
 import queue
 import sqlite3
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 
@@ -68,6 +68,31 @@ store.seed_default_device(
 )
 
 broker = EventBroker(DemoConfig.EVENT_BACKLOG_SIZE)
+
+
+def _persist_uplink(event: dict) -> None:
+    """Store every uplink that carries a payload so customers can browse
+    historical sensor readings (the live charts are otherwise in-memory)."""
+    if event.get("type") != "uplink":
+        return
+    payload_json = event.get("payload_json")
+    payload_hex = event.get("payload_hex")
+    if not (isinstance(payload_json, dict) and payload_json) and not payload_hex:
+        return
+    try:
+        store.record_sensor_reading(
+            wireless_device_id=event.get("wireless_device_id"),
+            ts=event.get("ts") or "",
+            link_name=event.get("link_name"),
+            payload_json=payload_json,
+            payload_hex=payload_hex,
+        )
+    except Exception:
+        LOGGER.warning("Failed to persist sensor reading", exc_info=True)
+
+
+broker.add_hook(_persist_uplink)
+
 cloud_service = SidewalkCloudService(DemoConfig, broker)
 cloud_service.start(store.unique_uplink_topics())
 
@@ -662,6 +687,68 @@ def events():
         "X-Accel-Buffering": "no",
     }
     return Response(stream(), mimetype="text/event-stream", headers=headers)
+
+
+SENSOR_HISTORY_RANGES = {
+    "hour": timedelta(hours=1),
+    "day": timedelta(days=1),
+    "week": timedelta(weeks=1),
+    "month": timedelta(days=30),
+    "year": timedelta(days=365),
+}
+SENSOR_HISTORY_MAX_POINTS = 600
+
+
+def _decimate(rows: list, max_points: int) -> list:
+    """Evenly sample ``rows`` down to ``max_points``, always keeping the most
+    recent reading, so a wide range still renders a faithful chart shape."""
+    count = len(rows)
+    if count <= max_points or max_points <= 0:
+        return rows
+    step = count / max_points
+    sampled = [rows[int(i * step)] for i in range(max_points)]
+    if sampled[-1] is not rows[-1]:
+        sampled.append(rows[-1])
+    return sampled
+
+
+@app.get("/api/sensor-history")
+@login_required
+def sensor_history():
+    user = current_user()
+    assert user is not None
+
+    range_key = request.args.get("range", "day").strip().lower()
+    delta = SENSOR_HISTORY_RANGES.get(range_key)
+    if delta is None:
+        return jsonify({"ok": False, "error": "Unknown range"}), 400
+
+    requested_device_id = request.args.get("device", "").strip()
+    device = None
+    if requested_device_id:
+        try:
+            device = store.get_device_for_user(user, int(requested_device_id))
+        except ValueError:
+            device = None
+    if device is None:
+        return jsonify({"ok": False, "error": "Device not found"}), 404
+
+    since_iso = (datetime.now(timezone.utc) - delta).isoformat(timespec="seconds")
+    readings = _decimate(
+        store.sensor_readings(device["wireless_device_id"], since_iso),
+        SENSOR_HISTORY_MAX_POINTS,
+    )
+    events = [
+        {
+            "type": "uplink",
+            "ts": reading["ts"],
+            "link_name": reading.get("link_name"),
+            "payload_json": reading.get("payload_json"),
+            "payload_hex": reading.get("payload_hex") or "",
+        }
+        for reading in readings
+    ]
+    return jsonify({"ok": True, "range": range_key, "count": len(events), "events": events})
 
 
 @app.post("/api/downlink")

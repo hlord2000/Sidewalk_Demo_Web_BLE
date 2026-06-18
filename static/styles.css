@@ -1398,8 +1398,25 @@ select:focus {
 
 .section-heading-meta {
   display: flex;
+  align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+
+.range-select {
+  width: auto;
+  min-height: 2.2rem;
+  padding: 0.3rem 0.85rem;
+  border-radius: 999px;
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.range-select:focus {
+  border-color: var(--accent-soft-strong);
 }
 
 .pill {

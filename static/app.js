@@ -8,6 +8,7 @@ const seqInput = document.getElementById("seq");
 const downlinkStatus = document.getElementById("downlink-status");
 const eventLog = document.getElementById("event-log");
 const deviceSelector = document.getElementById("device-selector");
+const sensorRangeSelect = document.getElementById("sensor-range");
 const selectedDeviceChip = document.getElementById("selected-device-chip");
 const selectedTopicChip = document.getElementById("selected-topic-chip");
 const bleNameMatchLabel = document.getElementById("ble-name-match");
@@ -2009,12 +2010,45 @@ if (blePayloadInput && !blePayloadInput.value) {
   }
 }
 
+// "Live" clears to the in-memory stream; a range loads persisted history,
+// after which live uplinks keep appending.
+async function applySensorRange() {
+  if (!window.SidewalkSensors) {
+    return;
+  }
+  const dashboard = window.SidewalkSensors.SensorDashboard;
+  const range = sensorRangeSelect ? sensorRangeSelect.value : "live";
+  if (range === "live") {
+    dashboard.reset();
+    return;
+  }
+  const device = currentDevice();
+  if (!device) {
+    dashboard.reset();
+    return;
+  }
+  try {
+    const params = new URLSearchParams({ device: device.id, range });
+    const response = await fetch(`/api/sensor-history?${params.toString()}`);
+    const data = await response.json();
+    if (data && data.ok) {
+      dashboard.loadHistory(data.events || []);
+    } else {
+      dashboard.reset();
+    }
+  } catch (error) {
+    dashboard.reset();
+  }
+}
+
+if (sensorRangeSelect) {
+  sensorRangeSelect.addEventListener("change", applySensorRange);
+}
+
 if (deviceSelector) {
   deviceSelector.addEventListener("change", async () => {
     updateSelectedDeviceUi();
-    if (window.SidewalkSensors) {
-      window.SidewalkSensors.SensorDashboard.reset();
-    }
+    await applySensorRange();
     connectEventStream();
     if (flashProvisionInput && flashProvisionInput.checked && flashPresetSelect && flashPresetSelect.value) {
       try {

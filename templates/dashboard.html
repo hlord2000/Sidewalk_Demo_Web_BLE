@@ -6,8 +6,8 @@
 </script>
 <script defer src="{{ url_for('static', filename='vendor/dap.umd.js', v='20260423webusb') }}"></script>
 <script defer src="{{ url_for('static', filename='ui.js', v='20260618loop') }}"></script>
-<script defer src="{{ url_for('static', filename='sensors.js', v='20260618loop') }}"></script>
-<script defer src="{{ url_for('static', filename='app.js', v='20260618loop') }}"></script>
+<script defer src="{{ url_for('static', filename='sensors.js', v='20260618hist') }}"></script>
+<script defer src="{{ url_for('static', filename='app.js', v='20260618hist') }}"></script>
 {% endblock %}
 {% block body %}
 <main class="page-shell app-shell">
@@ -91,6 +91,14 @@
         <h2>Sensor Monitor</h2>
       </div>
       <div class="section-heading-meta">
+        <select id="sensor-range" class="range-select" aria-label="Sensor time range">
+          <option value="live" selected>Live</option>
+          <option value="hour">Last hour</option>
+          <option value="day">Last day</option>
+          <option value="week">Last week</option>
+          <option value="month">Last month</option>
+          <option value="year">Last year</option>
+        </select>
         <span id="sensor-source" class="pill pill--muted">Awaiting data</span>
         <span id="sensor-last-seen" class="pill">No readings yet</span>
       </div>

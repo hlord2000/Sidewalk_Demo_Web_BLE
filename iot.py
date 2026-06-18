@@ -8,7 +8,7 @@ import threading
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 from uuid import uuid4
 
 try:
@@ -139,11 +139,26 @@ class EventBroker:
     def __init__(self, backlog_size: int) -> None:
         self._history: deque[dict[str, Any]] = deque(maxlen=backlog_size)
         self._listeners: set[queue.Queue] = set()
+        self._hooks: list[Callable[[dict[str, Any]], None]] = []
         self._lock = threading.Lock()
+
+    def add_hook(self, hook: Callable[[dict[str, Any]], None]) -> None:
+        """Register a server-side callback run once per published event.
+
+        Unlike SSE listeners (per connected browser), hooks fire regardless of
+        who is watching — used to persist uplinks to the database.
+        """
+        self._hooks.append(hook)
 
     def publish(self, event: dict[str, Any]) -> None:
         event = dict(event)
         event.setdefault("ts", utc_now_iso())
+
+        for hook in self._hooks:
+            try:
+                hook(event)
+            except Exception:
+                LOGGER.warning("Event hook failed", exc_info=True)
 
         with self._lock:
             self._history.append(event)

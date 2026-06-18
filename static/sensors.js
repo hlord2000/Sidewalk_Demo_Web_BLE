@@ -774,6 +774,18 @@
       }
     },
 
+    // Replace the charts with a batch of historical readings (oldest-first),
+    // after which live uplinks keep appending as normal.
+    loadHistory(events) {
+      this.reset();
+      if (Array.isArray(events)) {
+        for (const event of events) {
+          this.ingest(event);
+        }
+      }
+      this.redrawAll();
+    },
+
     // ---- Demo data (screenshots / offline preview only; gated by ?demo=1) ---
     injectDemo() {
       if (this._demoTimer) {

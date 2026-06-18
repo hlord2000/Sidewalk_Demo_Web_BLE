@@ -82,6 +82,19 @@ class DemoStore:
                     created_at TEXT NOT NULL,
                     PRIMARY KEY (device_id, customer_user_id)
                 );
+
+                CREATE TABLE IF NOT EXISTS sensor_readings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    wireless_device_id TEXT NOT NULL,
+                    ts TEXT NOT NULL,
+                    link_name TEXT,
+                    payload_json TEXT,
+                    payload_hex TEXT,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_sensor_readings_wid_ts
+                    ON sensor_readings (wireless_device_id, ts);
                 """
             )
             conn.execute(
@@ -276,6 +289,63 @@ class DemoStore:
                     (user["id"],),
                 ).fetchall()
             return [self._decode_device_row(row) for row in rows]
+
+    def record_sensor_reading(
+        self,
+        *,
+        wireless_device_id: str | None,
+        ts: str,
+        link_name: str | None,
+        payload_json: Any | None,
+        payload_hex: str | None,
+    ) -> None:
+        """Persist one uplink so historical sensor data survives restarts."""
+        if not wireless_device_id:
+            return
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO sensor_readings
+                    (wireless_device_id, ts, link_name, payload_json, payload_hex, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    wireless_device_id,
+                    ts,
+                    link_name,
+                    json.dumps(payload_json) if payload_json is not None else None,
+                    payload_hex or None,
+                    utc_now_iso(),
+                ),
+            )
+
+    def sensor_readings(
+        self,
+        wireless_device_id: str,
+        since_iso: str,
+        limit: int = 5000,
+    ) -> list[dict[str, Any]]:
+        """Most recent readings at or after ``since_iso``, oldest-first."""
+        if not wireless_device_id:
+            return []
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT ts, link_name, payload_json, payload_hex
+                FROM sensor_readings
+                WHERE wireless_device_id = ? AND ts >= ?
+                ORDER BY ts DESC
+                LIMIT ?
+                """,
+                (wireless_device_id, since_iso, limit),
+            ).fetchall()
+        readings = []
+        for row in reversed(rows):
+            item = dict(row)
+            raw = item.get("payload_json")
+            item["payload_json"] = json.loads(raw) if raw else None
+            readings.append(item)
+        return readings
 
     def list_all_devices(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
