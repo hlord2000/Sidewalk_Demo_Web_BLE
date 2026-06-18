@@ -5,9 +5,9 @@
   window.DEMO_CONFIG = {{ page_config | tojson }};
 </script>
 <script defer src="{{ url_for('static', filename='vendor/dap.umd.js', v='20260423webusb') }}"></script>
-<script defer src="{{ url_for('static', filename='ui.js', v='20260617admin2') }}"></script>
-<script defer src="{{ url_for('static', filename='sensors.js', v='20260617tabs') }}"></script>
-<script defer src="{{ url_for('static', filename='app.js', v='20260617evt') }}"></script>
+<script defer src="{{ url_for('static', filename='ui.js', v='20260618loop') }}"></script>
+<script defer src="{{ url_for('static', filename='sensors.js', v='20260618loop') }}"></script>
+<script defer src="{{ url_for('static', filename='app.js', v='20260618loop') }}"></script>
 {% endblock %}
 {% block body %}
 <main class="page-shell app-shell">
@@ -70,11 +70,7 @@
   <nav class="tabnav" role="tablist" data-tabset="dashboard" aria-label="Console sections">
     <button class="tab" role="tab" type="button" data-tab-target="monitor" aria-selected="true">
       <svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 4-6"/></svg>
-      <span>Monitor</span>
-    </button>
-    <button class="tab" role="tab" type="button" data-tab-target="device" aria-selected="false">
-      <svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><line x1="4" y1="8" x2="20" y2="8"/><circle cx="9" cy="8" r="2.4"/><line x1="4" y1="16" x2="20" y2="16"/><circle cx="15" cy="16" r="2.4"/></svg>
-      <span>Control</span>
+      <span>Monitor &amp; Control</span>
     </button>
     <button class="tab" role="tab" type="button" data-tab-target="flash" aria-selected="false">
       <svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>
@@ -86,8 +82,9 @@
     </button>
   </nav>
 
-  <!-- ====================== MONITOR ====================== -->
-  <section class="tabpanel" data-tab-panel="monitor" role="tabpanel">
+  <!-- ================== MONITOR & CONTROL ================== -->
+  <section class="tabpanel loop-panel" data-tab-panel="monitor" role="tabpanel">
+    <section class="loop-monitor">
     <div class="section-heading">
       <div>
         <p class="eyebrow">Live telemetry</p>
@@ -103,46 +100,38 @@
 
     <div id="sensor-empty" class="empty-state">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 4-6"/></svg>
-      <h3>Waiting for sensor uplinks</h3>
+      <h3>No sensor data yet</h3>
       <p class="muted">
-        Charts populate automatically as the selected device reports. Trigger a reading from
-        <button type="button" class="linklike js-go-tab" data-go-tab="device">Device Control</button>,
-        or move the board to wake its motion sensor.
+        Charts appear once the selected device reports. Use Device Control to request a reading.
       </p>
     </div>
 
     <div id="sensor-charts" class="chart-grid" hidden></div>
+    </section>
 
-    <article class="panel panel-wide">
+    <article class="panel panel-wide loop-log">
       <details class="log-disclosure" open>
         <summary>
           <span class="panel-head-inline">
             <span class="eyebrow">Server stream</span>
             <h2>Raw Uplink Log</h2>
           </span>
-          <span class="muted">Server-side MQTT stream, filtered to the selected device.</span>
+          <span class="muted">MQTT uplinks for the selected device.</span>
         </summary>
         <div id="event-log" class="event-log"></div>
       </details>
     </article>
-  </section>
 
-  <!-- ====================== DEVICE CONTROL ====================== -->
-  <section class="tabpanel" data-tab-panel="device" role="tabpanel" hidden>
-    <article class="panel panel-wide panel-console">
+    <article class="panel loop-control">
       <div class="panel-head">
         <p class="eyebrow">Local link</p>
         <h2>Device Control</h2>
-        <p class="muted">
-          Connect to the board over Web Bluetooth to trigger Sidewalk flows and check its radio links.
-          Pick a device exposing <code id="ble-name-match">{{ page_config.webShellNamePrefix }}</code>.
-        </p>
       </div>
 
       <div class="stack device-control">
         <div class="control-connect">
           <div class="inline-actions console-actions">
-            <button id="ble-connect" type="button">Connect over Bluetooth</button>
+            <button id="ble-connect" type="button">Connect</button>
             <button id="ble-disconnect" type="button" class="ghost-button">Disconnect</button>
           </div>
           <p id="ble-status" class="conn-state conn-state--off">Disconnected</p>
@@ -160,20 +149,20 @@
           <div>
             <p class="control-label">Send a test message</p>
             <div class="inline-actions inline-actions--triple">
-              <button type="button" class="js-link-workflow" data-workflow="ble" title="sid flow send ble">Send over BLE</button>
-              <button type="button" class="js-link-workflow" data-workflow="fsk" title="sid flow send fsk">Send over FSK</button>
-              <button type="button" class="js-link-workflow" data-workflow="lora" title="sid flow send lora">Send over LoRa</button>
+              <button type="button" class="js-link-workflow" data-workflow="ble" title="sid flow send ble">BLE</button>
+              <button type="button" class="js-link-workflow" data-workflow="fsk" title="sid flow send fsk">FSK</button>
+              <button type="button" class="js-link-workflow" data-workflow="lora" title="sid flow send lora">LoRa</button>
             </div>
           </div>
           <div>
-            <p class="control-label">Ask the device to report in</p>
+            <p class="control-label">Request data from the device</p>
             <div class="inline-actions inline-actions--triple">
-              <button type="button" class="js-shell-command ghost-button" data-command="sid flow sensor ble" data-label="Read sensors" title="sid flow sensor ble">Read sensors</button>
-              <button type="button" class="js-shell-command ghost-button" data-command="sid flow power ble" data-label="Read battery" title="sid flow power ble">Read battery</button>
-              <button type="button" class="js-shell-command ghost-button" data-command="sid flow telemetry ble" data-label="Send telemetry" title="sid flow telemetry ble">Send telemetry</button>
+              <button type="button" class="js-shell-command ghost-button" data-command="sid flow sensor ble" data-label="Read sensors" title="sid flow sensor ble">Sensors</button>
+              <button type="button" class="js-shell-command ghost-button" data-command="sid flow power ble" data-label="Read battery" title="sid flow power ble">Battery</button>
+              <button type="button" class="js-shell-command ghost-button" data-command="sid flow telemetry ble" data-label="Send telemetry" title="sid flow telemetry ble">Telemetry</button>
             </div>
           </div>
-          <p id="ble-workflow-status" class="muted action-status">Connect to start controlling the device.</p>
+          <p id="ble-workflow-status" class="muted action-status">Connect to send commands.</p>
         </div>
 
         <details class="console-secondary">
@@ -185,7 +174,7 @@
                 <textarea
                   id="ble-payload"
                   rows="3"
-                  placeholder="Hello from the Web BLE console"></textarea>
+                  placeholder="Message to send"></textarea>
               </label>
               <div class="inline-fields inline-fields--triple">
                 <label>
@@ -279,7 +268,7 @@
       <div class="panel-head">
         <p class="eyebrow">Probe over USB</p>
         <h2>WebUSB Flash</h2>
-        <p class="muted">Choose the XIAO CMSIS-DAP probe from a Chromium browser, load a bundled image or your own <code>.hex</code>, and flash directly over WebUSB with on-target verify.</p>
+        <p class="muted">Select the CMSIS-DAP probe in a Chromium browser, pick a bundled image or your own <code>.hex</code>, and flash over WebUSB.</p>
       </div>
       <div class="stack flash-stack">
         <div class="inline-fields flash-source-grid">
@@ -303,7 +292,7 @@
           <span>Provision selected AWS device into bundled firmware</span>
         </label>
         {% endif %}
-        <p class="muted flash-note">Built-in images ship with this dashboard release. Choosing a custom file clears the bundled selection.</p>
+        <p class="muted flash-note">Choosing a custom file clears the bundled selection.</p>
         <div class="inline-actions">
           <button id="flash-connect" type="button">Choose Probe</button>
           <button id="flash-disconnect" type="button" class="ghost-button">Disconnect Probe</button>
@@ -314,7 +303,7 @@
           <button id="flash-recover" type="button" class="ghost-button">Recover / Unlock</button>
         </div>
         <button id="flash-clear-log" type="button" class="ghost-button flash-clear-button">Clear Log</button>
-        <p class="muted flash-note">On nRF54L, recover uses CTRL-AP erase-all, so it wipes flash while clearing debug lock.</p>
+        <p class="muted flash-note">On nRF54L, Recover erases all flash while clearing the debug lock.</p>
         <div class="monitor-meta">
           <span id="flash-image-chip">No firmware selected</span>
           <span id="flash-probe-chip">No probe selected</span>
@@ -332,7 +321,7 @@
       <div class="panel-head">
         <p class="eyebrow">Cloud to device</p>
         <h2>Cloud Downlink</h2>
-        <p class="muted">Send application payloads to the currently selected Sidewalk endpoint.</p>
+        <p class="muted">Send a payload to the selected device.</p>
       </div>
       {% if not page_config.selectedDeviceId %}
       <pre id="downlink-status" class="status-box">No device is assigned to this account yet.</pre>
@@ -340,7 +329,7 @@
       <form id="downlink-form" class="stack">
         <label>
           <span>Payload</span>
-          <textarea id="payload" rows="4" placeholder="Hello from the control plane"></textarea>
+          <textarea id="payload" rows="4" placeholder="Message to send"></textarea>
         </label>
         <div class="inline-fields">
           <label>
@@ -368,8 +357,8 @@
   </section>
 
   <footer class="nordic-footer">
-    <span>Nordic Semiconductor demo environment</span>
-    <span>Sidewalk + Web BLE control plane</span>
+    <span>Nordic Semiconductor</span>
+    <span>Sidewalk Demo</span>
   </footer>
 </main>
 {% endblock %}

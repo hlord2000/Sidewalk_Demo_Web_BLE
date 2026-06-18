@@ -57,7 +57,7 @@ const deviceMap = new Map(devices.map((device) => [String(device.id), device]));
 const deviceByWirelessId = new Map(devices.map((device) => [device.wirelessDeviceId, device]));
 const firmwareImages = config.firmwareImages || [];
 const firmwareImageMap = new Map(firmwareImages.map((image) => [image.id, image]));
-const DEFAULT_BLE_WORKFLOW_STATUS = "Connect to start controlling the device.";
+const DEFAULT_BLE_WORKFLOW_STATUS = "Connect to send commands.";
 const BLE_DEVICE_MATCH_LABEL = "Nordic UART or Sidewalk BLE service";
 const DEFAULT_NUS_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const DEFAULT_NUS_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";

@@ -4,37 +4,37 @@
 <main class="login-shell">
   <section class="login-stage">
     <aside class="login-brand">
-      <a class="brand-home brand-home--light" href="https://www.nordicsemi.com/" target="_blank" rel="noreferrer">
-        <span class="brand-mark">
-          <img src="{{ url_for('static', filename='assets/mark.svg', v='20260614mark') }}" alt="Sidewalk Demo">
-        </span>
-        <span>
-          <span class="eyebrow">Nordic Semiconductor</span>
-          <strong class="brand-title">Sidewalk Demo</strong>
-        </span>
-      </a>
-      <h1>Secure field access for Sidewalk and Web BLE.</h1>
-      <p class="brand-lead">Use the same control plane to monitor uplinks, send cloud downlinks, and open a live BLE shell from the phone browser.</p>
+      <div class="login-brand-top">
+        <a class="brand-home brand-home--light" href="https://www.nordicsemi.com/" target="_blank" rel="noreferrer">
+          <span class="brand-mark">
+            <img src="{{ url_for('static', filename='assets/mark.svg', v='20260614mark') }}" alt="Sidewalk Demo">
+          </span>
+          <span>
+            <span class="eyebrow">Nordic Semiconductor</span>
+            <strong class="brand-title">Sidewalk Demo</strong>
+          </span>
+        </a>
+        <h1>Monitor and control Amazon Sidewalk devices from the browser.</h1>
+      </div>
       <div class="brand-highlights">
         <div class="highlight-card">
           <span class="highlight-label">Cloud</span>
-          <strong>AWS IoT Wireless routing</strong>
+          <strong>AWS IoT MQTT Routing</strong>
         </div>
         <div class="highlight-card">
-          <span class="highlight-label">Browser</span>
-          <strong>Nordic UART over Web Bluetooth</strong>
+          <span class="highlight-label">Interface</span>
+          <strong>over Web BLE</strong>
         </div>
         <div class="highlight-card">
           <span class="highlight-label">Demo</span>
-          <strong>Provision, monitor, and control devices</strong>
+          <strong>Provision and test devices</strong>
         </div>
       </div>
     </aside>
 
     <section class="login-card">
-      <p class="eyebrow">Authenticated access</p>
       <h2>Sign in</h2>
-      <p class="muted">This browser stays signed in for 30 days. Use the credentials assigned to your account.</p>
+      <p class="muted">Stay signed in on this browser for 30 days.</p>
       <form method="post" class="login-form">
         <label>
           <span>Email</span>

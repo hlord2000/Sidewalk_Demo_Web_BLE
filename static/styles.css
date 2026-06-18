@@ -286,6 +286,10 @@ button:active {
 
 .login-brand {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 2.5rem;
   padding: 2.6rem;
   overflow: hidden;
   border-radius: var(--radius-lg);
@@ -293,10 +297,16 @@ button:active {
   color: #fff;
 }
 
+.login-brand-top {
+  display: flex;
+  flex-direction: column;
+  gap: 1.6rem;
+}
+
 .login-brand h1 {
-  max-width: 15ch;
+  max-width: 19ch;
   color: #fff;
-  font-size: clamp(2.1rem, 4.4vw, 3.4rem);
+  font-size: clamp(1.9rem, 3.4vw, 2.7rem);
 }
 
 .brand-lead {
@@ -310,7 +320,7 @@ button:active {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.9rem;
-  margin-top: 2.4rem;
+  margin-top: 0;
 }
 
 .highlight-card {
@@ -1336,6 +1346,41 @@ select:focus {
   margin-top: 1.4rem;
 }
 
+/* --- Merged Monitor & Control layout ------------------------------------- */
+/* Control on the left, live graphs on the right, raw log full-width below,
+   so the send-command -> sensor-response loop is visible at a glance. */
+.tabpanel.loop-panel {
+  display: grid;
+  grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.loop-control {
+  order: 1;
+  grid-column: auto;
+  min-width: 0;
+}
+
+.loop-monitor {
+  order: 2;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.loop-log {
+  order: 3;
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1100px) {
+  .tabpanel.loop-panel {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* --- Section heading ----------------------------------------------------- */
 .section-heading {
   display: flex;
@@ -1718,6 +1763,14 @@ button:disabled,
 
 .device-control {
   gap: 1.3rem;
+}
+
+/* Narrow control column: tighter padding and no wrapping so action-button
+   labels stay on a single line. */
+.loop-control .inline-actions button,
+.loop-control .inline-actions .ghost-button {
+  padding: 0 0.7rem;
+  white-space: nowrap;
 }
 
 .control-connect {

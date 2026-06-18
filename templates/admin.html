@@ -12,7 +12,7 @@
       </span>
       <span>
         <span class="eyebrow">Nordic Semiconductor</span>
-        <strong class="brand-title">Admin Control Plane</strong>
+        <strong class="brand-title">Admin</strong>
       </span>
     </a>
     <div class="appbar-actions">
@@ -54,7 +54,7 @@
       <div>
         <p class="eyebrow">Accounts</p>
         <h2>Customers <span class="toolbar-count">{{ customers|length }}</span></h2>
-        <p class="muted">Logins are stored locally; each customer only sees the devices assigned to them.</p>
+        <p class="muted">Each customer only sees the devices assigned to them.</p>
       </div>
       <button type="button" class="add-button" data-open-modal="modal-add-customer">
         <span class="add-glyph">+</span> Add customer
@@ -92,7 +92,7 @@
     <div class="empty-state">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/></svg>
       <h3>No customers yet</h3>
-      <p class="muted">Create a customer account to give someone scoped access to their devices.</p>
+      <p class="muted">Add a customer to give them access to assigned devices.</p>
       <button type="button" class="add-button" data-open-modal="modal-add-customer"><span class="add-glyph">+</span> Add customer</button>
     </div>
     {% endif %}
@@ -104,7 +104,7 @@
       <div>
         <p class="eyebrow">Inventory</p>
         <h2>Devices <span class="toolbar-count">{{ devices|length }}</span></h2>
-        <p class="muted">Register Sidewalk devices, assign them to customers, and download manufacturing artifacts.</p>
+        <p class="muted">Register devices, assign them to customers, and download provisioning files.</p>
       </div>
       <div class="toolbar-actions">
         <button type="button" class="add-button" data-open-modal="modal-create-device"><span class="add-glyph">+</span> Create device</button>
@@ -185,8 +185,8 @@
   </section>
 
   <footer class="nordic-footer">
-    <span>Nordic Semiconductor demo environment</span>
-    <span>Administrative inventory and provisioning</span>
+    <span>Nordic Semiconductor</span>
+    <span>Sidewalk Demo</span>
   </footer>
 
   <!-- ====================== MODALS ====================== -->
@@ -238,7 +238,7 @@
         <button type="button" class="icon-button" data-close-modal aria-label="Close">&times;</button>
       </div>
       <div class="modal-body stack">
-        <p class="muted modal-note">Creates the cloud-side wireless device, tracks it locally, and stores provisioning JSON for download.</p>
+        <p class="muted modal-note">Creates the wireless device in AWS, tracks it here, and stores provisioning files for download.</p>
         <label>
           <span>Device Name</span>
           <input type="text" name="name" placeholder="Water Heater 01" required>
