@@ -138,11 +138,15 @@
         </div>
 
         <div class="link-status" aria-label="Sidewalk link status">
-          <span class="link-status-label">Link status</span>
-          <span class="link-pill" id="link-pill-ble" data-state="unknown"><span class="link-dot"></span>BLE</span>
-          <span class="link-pill" id="link-pill-fsk" data-state="unknown"><span class="link-dot"></span>FSK</span>
-          <span class="link-pill" id="link-pill-lora" data-state="unknown"><span class="link-dot"></span>LoRa</span>
-          <button type="button" class="ghost-button link-refresh js-shell-command" data-command="sid flow status" data-label="Refreshing link status" title="sid flow status">Refresh</button>
+          <div class="link-status-head">
+            <span class="link-status-label">Link status</span>
+            <button type="button" class="ghost-button link-refresh js-shell-command" data-command="sid flow status" data-label="Refreshing link status" title="sid flow status">Refresh</button>
+          </div>
+          <div class="link-pills">
+            <span class="link-pill" id="link-pill-ble" data-state="unknown"><span class="link-dot"></span>BLE</span>
+            <span class="link-pill" id="link-pill-fsk" data-state="unknown"><span class="link-dot"></span>FSK</span>
+            <span class="link-pill" id="link-pill-lora" data-state="unknown"><span class="link-dot"></span>LoRa</span>
+          </div>
         </div>
 
         <div class="control-actions">
