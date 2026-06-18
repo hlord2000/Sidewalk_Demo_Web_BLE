@@ -10,7 +10,7 @@ const eventLog = document.getElementById("event-log");
 const deviceSelector = document.getElementById("device-selector");
 const selectedDeviceChip = document.getElementById("selected-device-chip");
 const selectedTopicChip = document.getElementById("selected-topic-chip");
-const bleNamePrefixLabel = document.getElementById("ble-name-prefix");
+const bleNameMatchLabel = document.getElementById("ble-name-match");
 
 const bleStatus = document.getElementById("ble-status");
 const bleTerminal = document.getElementById("ble-terminal");
@@ -29,6 +29,11 @@ const bleCopyCommandButton = document.getElementById("ble-copy-command");
 const bleShortcutButtons = Array.from(document.querySelectorAll(".js-shell-command"));
 const bleWorkflowButtons = Array.from(document.querySelectorAll(".js-link-workflow"));
 const bleWorkflowStatus = document.getElementById("ble-workflow-status");
+const linkPills = {
+  ble: document.getElementById("link-pill-ble"),
+  fsk: document.getElementById("link-pill-fsk"),
+  lora: document.getElementById("link-pill-lora"),
+};
 const eventFeedStatus = document.getElementById("event-feed-status");
 const flashFileInput = document.getElementById("flash-file");
 const flashPresetSelect = document.getElementById("flash-preset");
@@ -52,7 +57,37 @@ const deviceMap = new Map(devices.map((device) => [String(device.id), device]));
 const deviceByWirelessId = new Map(devices.map((device) => [device.wirelessDeviceId, device]));
 const firmwareImages = config.firmwareImages || [];
 const firmwareImageMap = new Map(firmwareImages.map((image) => [image.id, image]));
-const DEFAULT_BLE_WORKFLOW_STATUS = "";
+const DEFAULT_BLE_WORKFLOW_STATUS = "Connect to start controlling the device.";
+const BLE_DEVICE_MATCH_LABEL = "Nordic UART or Sidewalk BLE service";
+const DEFAULT_NUS_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const DEFAULT_NUS_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+const DEFAULT_NUS_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+const DEFAULT_SIDEWALK_BLE_SERVICE_UUID = "0000fe03-0000-1000-8000-00805f9b34fb";
+const DEFAULT_SIDEWALK_BLE_WRITE_UUID = "74f996c9-7d6c-4d58-9232-0427ab61c53c";
+const DEFAULT_SIDEWALK_BLE_NOTIFY_UUID = "b32e83c0-fece-47c1-9015-53b7e7f0d2fe";
+const BLE_PROFILES = [
+  {
+    id: "nus",
+    label: "Nordic UART",
+    serviceUuid: config.nusServiceUuid || DEFAULT_NUS_SERVICE_UUID,
+    writeUuid: config.nusRxUuid || DEFAULT_NUS_RX_UUID,
+    notifyUuid: config.nusTxUuid || DEFAULT_NUS_TX_UUID,
+    textShell: true,
+  },
+  {
+    id: "sidewalk",
+    label: "Sidewalk BLE",
+    serviceUuid: config.sidewalkBleServiceUuid || DEFAULT_SIDEWALK_BLE_SERVICE_UUID,
+    writeUuid: config.sidewalkBleWriteUuid || DEFAULT_SIDEWALK_BLE_WRITE_UUID,
+    notifyUuid: config.sidewalkBleNotifyUuid || DEFAULT_SIDEWALK_BLE_NOTIFY_UUID,
+    textShell: false,
+  },
+].filter((profile) => profile.serviceUuid && profile.writeUuid && profile.notifyUuid);
+
+function bleRequestFilters() {
+  const services = Array.from(new Set(BLE_PROFILES.map((profile) => profile.serviceUuid)));
+  return services.map((serviceUuid) => ({ services: [serviceUuid] }));
+}
 
 const ANSI_COLORS = [
   "#0f172a",
@@ -103,16 +138,19 @@ const BLE_STATUS_PATTERN = /Link status:\s*\{BLE:\s*(Up|Down),\s*FSK:\s*(Up|Down
 const BLE_WORKFLOWS = {
   ble: {
     flowTarget: "ble",
+    label: "BLE",
     sendLink: 1,
     lowLatency: false,
   },
   fsk: {
     flowTarget: "fsk",
+    label: "FSK",
     sendLink: 2,
     lowLatency: false,
   },
   lora: {
     flowTarget: "lora",
+    label: "LoRa",
     sendLink: 3,
     lowLatency: true,
   },
@@ -519,6 +557,7 @@ let bleDevice = null;
 let bleServer = null;
 let bleRxCharacteristic = null;
 let bleTxCharacteristic = null;
+let bleConnectedProfile = null;
 let eventSource = null;
 let eventReconnectTimer = null;
 let eventReconnectDelay = 1000;
@@ -1285,32 +1324,49 @@ function currentDevice() {
   return deviceMap.get(deviceSelector.value) || null;
 }
 
+function setBleShellControlsDisabled(disabled) {
+  for (const button of bleShortcutButtons) {
+    button.disabled = disabled;
+  }
+  for (const button of bleWorkflowButtons) {
+    button.disabled = disabled;
+  }
+  if (blePayloadForm) {
+    for (const element of blePayloadForm.elements) {
+      element.disabled = disabled;
+    }
+  }
+  if (bleCommandInput) {
+    bleCommandInput.disabled = disabled;
+  }
+}
+
 function updateSelectedDeviceUi() {
   const device = currentDevice();
-  const namePrefix = (device && device.bleNamePrefix) || config.webShellNamePrefix || "XIAO-WebShell";
 
   if (selectedDeviceChip) {
     selectedDeviceChip.innerHTML = device
-      ? `Device ID: <code>${device.wirelessDeviceId}</code>`
+      ? `<span class="meta-key">Device ID</span> <code>${device.wirelessDeviceId}</code>`
       : "No assigned device";
   }
 
   if (selectedTopicChip) {
     selectedTopicChip.innerHTML = device && device.uplinkTopic
-      ? `Topic: <code>${device.uplinkTopic}</code>`
+      ? `<span class="meta-key">Topic</span> <code>${device.uplinkTopic}</code>`
       : "No uplink topic configured";
   }
 
-  if (bleNamePrefixLabel) {
-    bleNamePrefixLabel.textContent = namePrefix;
+  if (bleNameMatchLabel) {
+    bleNameMatchLabel.textContent = BLE_DEVICE_MATCH_LABEL;
   }
 
-  config.webShellNamePrefix = namePrefix;
+  config.webShellNamePrefix = BLE_DEVICE_MATCH_LABEL;
 }
 
 function appendTerminal(text) {
   bleShellRecentText = `${bleShellRecentText}${text}`.slice(-16000);
   updateBleSidewalkStatusFromText();
+  ingestDeviceEvents(text);
   bleTerminalRenderer.feed(text);
 }
 
@@ -1335,7 +1391,9 @@ function resetBleShellState() {
   bleServer = null;
   bleRxCharacteristic = null;
   bleTxCharacteristic = null;
+  bleConnectedProfile = null;
   bleShellRecentText = "";
+  bleEvtBuffer = "";
   bleWorkflowRunning = false;
   bleSidewalkStatus = {
     ble: null,
@@ -1343,8 +1401,104 @@ function resetBleShellState() {
     lora: null,
     updatedAt: 0,
   };
-  setBleWorkflowButtonsDisabled(false);
+  setBleShellControlsDisabled(true);
   setBleWorkflowStatus(DEFAULT_BLE_WORKFLOW_STATUS);
+  setConnState(false);
+  renderLinkStatus();
+}
+
+function setConnState(connected) {
+  if (!bleStatus) {
+    return;
+  }
+  bleStatus.classList.toggle("conn-state--on", connected);
+  bleStatus.classList.toggle("conn-state--off", !connected);
+}
+
+function renderLinkStatus() {
+  for (const key of ["ble", "fsk", "lora"]) {
+    const pill = linkPills[key];
+    if (!pill) {
+      continue;
+    }
+    const state = bleSidewalkStatus[key];
+    pill.dataset.state = state === "up" ? "up" : state === "down" ? "down" : "unknown";
+  }
+}
+
+// The firmware emits structured "EVT:{...}" frames over the NUS shell so the
+// device can report what it is doing (link status, uplinks, downlinks, errors).
+let bleEvtBuffer = "";
+
+function stripAnsi(text) {
+  // Drop the VT100 cursor/erase sequences the shell wraps async output in.
+  return text.replace(/\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/[=>]/g, "");
+}
+
+function ingestDeviceEvents(text) {
+  bleEvtBuffer += text;
+  if (bleEvtBuffer.length > 8000) {
+    bleEvtBuffer = bleEvtBuffer.slice(-8000);
+  }
+
+  let breakIndex;
+  while ((breakIndex = bleEvtBuffer.search(/[\r\n]/)) >= 0) {
+    const line = bleEvtBuffer.slice(0, breakIndex);
+    bleEvtBuffer = bleEvtBuffer.slice(breakIndex + 1);
+    handleEvtLine(line);
+  }
+}
+
+function handleEvtLine(rawLine) {
+  const line = stripAnsi(rawLine);
+  const marker = line.indexOf("EVT:");
+  if (marker < 0) {
+    return;
+  }
+  const start = line.indexOf("{", marker);
+  const end = line.indexOf("}", start);
+  if (start < 0 || end < 0) {
+    return;
+  }
+  let event;
+  try {
+    event = JSON.parse(line.slice(start, end + 1));
+  } catch (error) {
+    return;
+  }
+  handleDeviceEvent(event);
+}
+
+function handleDeviceEvent(event) {
+  if (!event || typeof event !== "object") {
+    return;
+  }
+
+  switch (event.t) {
+    case "status":
+      bleSidewalkStatus = {
+        ble: event.ble ? "up" : "down",
+        fsk: event.fsk ? "up" : "down",
+        lora: event.lora ? "up" : "down",
+        updatedAt: Date.now(),
+      };
+      renderLinkStatus();
+      setBleWorkflowStatus(
+        `Device: ${event.reg ? "registered" : "unregistered"} · ${event.time ? "time synced" : "time not synced"}`
+      );
+      break;
+    case "tx":
+      setBleWorkflowStatus(`Uplink sent over the air (id ${event.v}) ✓`);
+      break;
+    case "rx":
+      setBleWorkflowStatus(`Downlink received from cloud (${event.v} bytes)`);
+      break;
+    case "err":
+      setBleWorkflowStatus(`Device reported send error (code ${event.v})`);
+      break;
+    default:
+      break;
+  }
 }
 
 function updateBleSidewalkStatusFromText() {
@@ -1367,6 +1521,7 @@ function updateBleSidewalkStatusFromText() {
     lora: match[3].toLowerCase(),
     updatedAt: Date.now(),
   };
+  renderLinkStatus();
 }
 
 function setEventFeedStatus(text, state) {
@@ -1379,7 +1534,15 @@ function setEventFeedStatus(text, state) {
   eventFeedStatus.classList.add(`live-badge--${state}`);
 }
 
+function ingestSensorEvent(event) {
+  if (window.SidewalkSensors) {
+    window.SidewalkSensors.SensorDashboard.ingest(event);
+  }
+}
+
 function renderEvent(event) {
+  ingestSensorEvent(event);
+
   const card = document.createElement("article");
   card.className = "event-card event-card--fresh";
 
@@ -1612,9 +1775,9 @@ async function runBleLinkWorkflow(workflowName) {
   });
 
   try {
-    setBleWorkflowStatus(`Sending <code>${sendCommand}</code>`);
+    setBleWorkflowStatus(`Sending a test message over ${workflow.label}…`);
     await runBleShellCommand(sendCommand);
-    setBleWorkflowStatus(`Sent <code>${sendCommand}</code>.`);
+    setBleWorkflowStatus(`Test message sent over ${workflow.label}.`);
   } finally {
     bleWorkflowRunning = false;
     setBleWorkflowButtonsDisabled(false);
@@ -1627,17 +1790,17 @@ async function connectBleShell() {
     return;
   }
 
-  const device = currentDevice();
-  const namePrefix = (device && device.bleNamePrefix) || config.webShellNamePrefix || "XIAO-WebShell";
-  setBleStatus(`Scanning for ${namePrefix}...`);
+  setBleStatus(`Choose a BLE device exposing ${BLE_DEVICE_MATCH_LABEL}...`);
+  const optionalServices = BLE_PROFILES.map((profile) => profile.serviceUuid);
+  const filters = bleRequestFilters();
+
+  if (!filters.length) {
+    throw new Error("No BLE services are configured for discovery");
+  }
+
   bleDevice = await navigator.bluetooth.requestDevice({
-    filters: [
-      {
-        namePrefix,
-        services: [config.nusServiceUuid],
-      },
-    ],
-    optionalServices: [config.nusServiceUuid],
+    filters,
+    optionalServices,
   });
 
   bleDevice.addEventListener("gattserverdisconnected", () => {
@@ -1651,9 +1814,24 @@ async function connectBleShell() {
   });
 
   bleServer = await bleDevice.gatt.connect();
-  const service = await bleServer.getPrimaryService(config.nusServiceUuid);
-  bleRxCharacteristic = await service.getCharacteristic(config.nusRxUuid);
-  bleTxCharacteristic = await service.getCharacteristic(config.nusTxUuid);
+  const errors = [];
+
+  for (const profile of BLE_PROFILES) {
+    try {
+      const service = await bleServer.getPrimaryService(profile.serviceUuid);
+      bleRxCharacteristic = await service.getCharacteristic(profile.writeUuid);
+      bleTxCharacteristic = await service.getCharacteristic(profile.notifyUuid);
+      bleConnectedProfile = profile;
+      break;
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      errors.push(`${profile.label}: ${message}`);
+    }
+  }
+
+  if (!bleConnectedProfile) {
+    throw new Error(`Selected BLE device did not expose a supported service. ${errors.join(" ")}`);
+  }
 
   await bleTxCharacteristic.startNotifications();
   bleTxCharacteristic.addEventListener("characteristicvaluechanged", (event) => {
@@ -1661,8 +1839,18 @@ async function connectBleShell() {
     appendTerminal(chunk);
   });
 
-  setBleStatus(`Connected to ${bleDevice.name || "Sidewalk device"}`);
-  appendTerminal(`[connected ${bleDevice.name || "device"}]\n`);
+  setBleShellControlsDisabled(!bleConnectedProfile.textShell);
+  setConnState(true);
+  setBleStatus(`Connected to ${bleDevice.name || "BLE device"} over ${bleConnectedProfile.label}`);
+  appendTerminal(`[connected ${bleDevice.name || "device"} over ${bleConnectedProfile.label}]\n`);
+  if (bleConnectedProfile.textShell) {
+    setBleWorkflowStatus("Connected — trigger a flow or read sensors.");
+    // Populate the link-status pills right away.
+    runBleShellCommand("sid flow status").catch(() => {});
+  } else {
+    setBleWorkflowStatus("Connected over Sidewalk BLE — this transport doesn't expose the command shell.");
+    appendTerminal("[info] Sidewalk BLE transport connected; the sid command shell is over Nordic UART.\n");
+  }
 }
 
 async function disconnectBleShell() {
@@ -1679,8 +1867,19 @@ async function sendBleCommand(command) {
   if (!bleRxCharacteristic) {
     throw new Error("BLE shell is not connected");
   }
+
+  if (bleConnectedProfile && !bleConnectedProfile.textShell) {
+    throw new Error("Sidewalk BLE is connected; sid shell commands are on RTT for this devkit");
+  }
+
   const bytes = textEncoder.encode(`${command}\n`);
-  await bleRxCharacteristic.writeValue(bytes);
+  if (bleRxCharacteristic.writeValueWithoutResponse) {
+    await bleRxCharacteristic.writeValueWithoutResponse(bytes);
+  } else if (bleRxCharacteristic.writeValueWithResponse) {
+    await bleRxCharacteristic.writeValueWithResponse(bytes);
+  } else {
+    await bleRxCharacteristic.writeValue(bytes);
+  }
 }
 
 if (downlinkForm) {
@@ -1720,7 +1919,14 @@ if (bleShortcutButtons.length) {
       if (!command) {
         return;
       }
-      await runBleShellCommand(command);
+      const label = button.dataset.label;
+      if (label) {
+        setBleWorkflowStatus(`${label}…`);
+      }
+      const ok = await runBleShellCommand(command);
+      if (label) {
+        setBleWorkflowStatus(ok ? `${label} ✓` : `${label} failed`);
+      }
     });
   }
 }
@@ -1806,6 +2012,9 @@ if (blePayloadInput && !blePayloadInput.value) {
 if (deviceSelector) {
   deviceSelector.addEventListener("change", async () => {
     updateSelectedDeviceUi();
+    if (window.SidewalkSensors) {
+      window.SidewalkSensors.SensorDashboard.reset();
+    }
     connectEventStream();
     if (flashProvisionInput && flashProvisionInput.checked && flashPresetSelect && flashPresetSelect.value) {
       try {
@@ -1945,6 +2154,46 @@ if (navigator.usb) {
   });
 }
 
+function initSensorDashboard() {
+  if (!window.SidewalkSensors) {
+    return;
+  }
+  const charts = document.getElementById("sensor-charts");
+  const stats = document.getElementById("sensor-stats");
+  if (!charts && !stats) {
+    return;
+  }
+  window.SidewalkSensors.SensorDashboard.init({
+    stats,
+    charts,
+    empty: document.getElementById("sensor-empty"),
+    lastSeen: document.getElementById("sensor-last-seen"),
+    sourceChip: document.getElementById("sensor-source"),
+  });
+  // Canvases sized to zero while their tab is hidden; redraw when shown.
+  document.addEventListener("tab:activated", (event) => {
+    if (event.detail && event.detail.target === "monitor") {
+      window.SidewalkSensors.SensorDashboard.redrawAll();
+    }
+  });
+}
+
+// Device Control stays locked until a BLE connection is established.
+setBleShellControlsDisabled(true);
+setConnState(false);
+renderLinkStatus();
+
+// Offline preview / screenshots: show the control panel in a connected state.
+if (new URLSearchParams(window.location.search).get("demo") === "1") {
+  bleSidewalkStatus = { ble: "up", fsk: "down", lora: "up", updatedAt: Date.now() };
+  renderLinkStatus();
+  setConnState(true);
+  setBleStatus("Connected to Sidewalk Devkit (demo)");
+  setBleShellControlsDisabled(false);
+  setBleWorkflowStatus("Demo mode — controls are illustrative.");
+}
+
+initSensorDashboard();
 updateSelectedDeviceUi();
 connectEventStream();
 updateFlashUi();

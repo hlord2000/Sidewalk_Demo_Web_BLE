@@ -67,7 +67,7 @@ class DemoStore:
                     destination_name TEXT NOT NULL DEFAULT '',
                     uplink_topic TEXT NOT NULL DEFAULT '',
                     device_profile_id TEXT NOT NULL DEFAULT '',
-                    ble_name_prefix TEXT NOT NULL DEFAULT 'XIAO-WebShell',
+                    ble_name_prefix TEXT NOT NULL DEFAULT 'WebShell',
                     active INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
@@ -91,6 +91,9 @@ class DemoStore:
                 FROM devices
                 WHERE customer_user_id IS NOT NULL
                 """
+            )
+            conn.execute(
+                "UPDATE devices SET ble_name_prefix = 'WebShell' WHERE ble_name_prefix = 'XIAO-WebShell'"
             )
             self._ensure_column(conn, "users", "can_provision", "INTEGER NOT NULL DEFAULT 0")
             conn.execute("UPDATE users SET can_provision = 1 WHERE role = 'admin'")
@@ -154,8 +157,8 @@ class DemoStore:
                     """
                     INSERT INTO devices (
                         customer_user_id, name, description, wireless_device_id, destination_name,
-                        uplink_topic, device_profile_id, created_at, updated_at
-                    ) VALUES (NULL, ?, '', ?, ?, ?, ?, ?, ?)
+                        uplink_topic, device_profile_id, ble_name_prefix, created_at, updated_at
+                    ) VALUES (NULL, ?, '', ?, ?, ?, ?, 'WebShell', ?, ?)
                     """,
                     (
                         "Primary Demo Device",
@@ -347,7 +350,7 @@ class DemoStore:
                     destination_name or "",
                     uplink_topic or "",
                     device_profile_id or "",
-                    ble_name_prefix or "XIAO-WebShell",
+                    ble_name_prefix or "WebShell",
                     now,
                     now,
                     json.dumps(wireless_device_json) if wireless_device_json else None,

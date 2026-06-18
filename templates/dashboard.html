@@ -1,230 +1,280 @@
 {% extends "base.html" %}
-{% block title %}Sidewalk Demo Console{% endblock %}
+{% block title %}Sidewalk Device Console{% endblock %}
 {% block head %}
 <script>
   window.DEMO_CONFIG = {{ page_config | tojson }};
 </script>
 <script defer src="{{ url_for('static', filename='vendor/dap.umd.js', v='20260423webusb') }}"></script>
-<script defer src="{{ url_for('static', filename='app.js', v='20260512winsafe') }}"></script>
+<script defer src="{{ url_for('static', filename='ui.js', v='20260617admin2') }}"></script>
+<script defer src="{{ url_for('static', filename='sensors.js', v='20260617tabs') }}"></script>
+<script defer src="{{ url_for('static', filename='app.js', v='20260617evt') }}"></script>
 {% endblock %}
 {% block body %}
-<main class="page-shell">
-  <header class="topbar">
-    <div class="topbar-head">
-      <a class="brand-home" href="https://www.nordicsemi.com/" target="_blank" rel="noreferrer">
-        <span class="brand-mark">
-          <img src="{{ url_for('static', filename='assets/nordic-logo.svg', v='20260406nordic') }}" alt="Nordic Semiconductor">
-        </span>
-        <span>
-          <span class="eyebrow">Nordic Semiconductor</span>
-          <strong class="brand-title">Sidewalk Device Console</strong>
-        </span>
-      </a>
-      <div class="topbar-actions topbar-actions--stack">
-        {% if page_config.adminUrl %}
-        <a class="ghost-button ghost-button--link" href="{{ page_config.adminUrl }}">Admin</a>
-        {% endif %}
-        <form method="post" action="{{ url_for('logout') }}">
-          <button class="ghost-button" type="submit">Sign Out</button>
-        </form>
-      </div>
-    </div>
-
-    <div class="hero-grid">
-      <div class="hero-copy">
-        <p class="eyebrow">Connected operations</p>
-        <h1>Multi-device cloud control with live Web BLE access.</h1>
-        <p class="muted">Monitor uplinks, send downlinks, and attach to the Nordic UART shell from a single mobile-friendly control surface.</p>
-        <div class="hero-meta">
-          <span>User <code>{{ page_config.user.email }}</code></span>
-          <span>Role <code>{{ page_config.user.role }}</code></span>
-          {% if page_config.selectedWirelessDeviceId %}
-          <span>Device <code>{{ page_config.selectedWirelessDeviceId }}</code></span>
-          {% endif %}
-          {% if page_config.selectedUplinkTopic %}
-          <span>Topic <code>{{ page_config.selectedUplinkTopic }}</code></span>
-          {% endif %}
-        </div>
-      </div>
-
-      <div class="hero-stats">
-        <div class="metric-card">
-          <span class="metric-label">Tracked Devices</span>
-          <strong class="metric-value">{{ page_config.devices|length }}</strong>
-        </div>
-        <div class="metric-card">
-          <span class="metric-label">BLE Shell</span>
-          <strong class="metric-value">{{ page_config.webShellNamePrefix }}*</strong>
-        </div>
-        <div class="metric-card">
-          <span class="metric-label">AWS Route</span>
-          <strong class="metric-value">{% if page_config.selectedUplinkTopic %}MQTT{% else %}Pending{% endif %}</strong>
-        </div>
-      </div>
+<main class="page-shell app-shell">
+  <header class="appbar">
+    <a class="brand-home" href="https://www.nordicsemi.com/" target="_blank" rel="noreferrer">
+      <span class="brand-mark">
+        <img src="{{ url_for('static', filename='assets/mark.svg', v='20260614mark') }}" alt="Sidewalk Demo">
+      </span>
+      <span>
+        <span class="eyebrow">Nordic Semiconductor</span>
+        <strong class="brand-title">Sidewalk Device Console</strong>
+      </span>
+    </a>
+    <div class="appbar-actions">
+      <span class="appbar-user" title="{{ page_config.user.email }}">
+        <span class="meta-key">{{ page_config.user.role }}</span>
+        <code>{{ page_config.user.email }}</code>
+      </span>
+      {% if page_config.adminUrl %}
+      <a class="ghost-button ghost-button--link" href="{{ page_config.adminUrl }}">Admin</a>
+      {% endif %}
+      <form method="post" action="{{ url_for('logout') }}">
+        <button class="ghost-button" type="submit">Sign Out</button>
+      </form>
     </div>
   </header>
 
-  <section class="section-intro">
-    <div>
-      <p class="eyebrow">Operations</p>
-      <h2>Active device workspace</h2>
+  <section class="devicebar">
+    <label class="devicebar-device">
+      <span>Active Device</span>
+      <select id="device-selector" {% if not page_config.devices %}disabled{% endif %}>
+        {% for device in page_config.devices %}
+        <option value="{{ device.id }}" {% if device.id == page_config.selectedDeviceId %}selected{% endif %}>
+          {{ device.name }}{% if device.customerName %} · {{ device.customerName }}{% endif %}
+        </option>
+        {% else %}
+        <option value="">No devices assigned</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="devicebar-meta monitor-meta">
+      <span id="event-feed-status" class="live-badge live-badge--connecting">Connecting</span>
+      <span id="selected-device-chip">
+        {% if page_config.selectedWirelessDeviceId %}
+        <span class="meta-key">Device ID</span> <code>{{ page_config.selectedWirelessDeviceId }}</code>
+        {% else %}
+        No assigned device
+        {% endif %}
+      </span>
+      <span id="selected-topic-chip">
+        {% if page_config.selectedUplinkTopic %}
+        <span class="meta-key">Topic</span> <code>{{ page_config.selectedUplinkTopic }}</code>
+        {% else %}
+        No uplink topic configured
+        {% endif %}
+      </span>
     </div>
-    <p class="muted">The layout follows the live device workflow: uplink log first, then shell, then cloud downlink.</p>
   </section>
 
-  <section class="grid">
-    <article class="panel panel-wide panel-log">
-      <div class="panel-head">
-        <p class="eyebrow">Server stream</p>
-        <h2>Uplink Monitor</h2>
-        <p class="muted">Server-side MQTT stream filtered to the selected device.</p>
-      </div>
-      <div class="stack">
-        <label>
-          <span>Tracked Device</span>
-          <select id="device-selector">
-            {% for device in page_config.devices %}
-            <option value="{{ device.id }}" {% if device.id == page_config.selectedDeviceId %}selected{% endif %}>
-              {{ device.name }}{% if device.customerName %} · {{ device.customerName }}{% endif %}
-            </option>
-            {% endfor %}
-          </select>
-        </label>
-        <div class="monitor-meta">
-          <span id="event-feed-status" class="live-badge live-badge--connecting">Connecting</span>
-          <span id="selected-device-chip">
-            {% if page_config.selectedWirelessDeviceId %}
-            Device ID: <code>{{ page_config.selectedWirelessDeviceId }}</code>
-            {% else %}
-            No assigned device
-            {% endif %}
-          </span>
-          <span id="selected-topic-chip">
-            {% if page_config.selectedUplinkTopic %}
-            Topic: <code>{{ page_config.selectedUplinkTopic }}</code>
-            {% else %}
-            No uplink topic configured
-            {% endif %}
-          </span>
-        </div>
-      </div>
-      <div id="event-log" class="event-log"></div>
-    </article>
+  <nav class="tabnav" role="tablist" data-tabset="dashboard" aria-label="Console sections">
+    <button class="tab" role="tab" type="button" data-tab-target="monitor" aria-selected="true">
+      <svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 4-6"/></svg>
+      <span>Monitor</span>
+    </button>
+    <button class="tab" role="tab" type="button" data-tab-target="device" aria-selected="false">
+      <svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><line x1="4" y1="8" x2="20" y2="8"/><circle cx="9" cy="8" r="2.4"/><line x1="4" y1="16" x2="20" y2="16"/><circle cx="15" cy="16" r="2.4"/></svg>
+      <span>Control</span>
+    </button>
+    <button class="tab" role="tab" type="button" data-tab-target="flash" aria-selected="false">
+      <svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>
+      <span>Flash</span>
+    </button>
+    <button class="tab" role="tab" type="button" data-tab-target="downlink" aria-selected="false">
+      <svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M5 21h14"/></svg>
+      <span>Downlink</span>
+    </button>
+  </nav>
 
+  <!-- ====================== MONITOR ====================== -->
+  <section class="tabpanel" data-tab-panel="monitor" role="tabpanel">
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Live telemetry</p>
+        <h2>Sensor Monitor</h2>
+      </div>
+      <div class="section-heading-meta">
+        <span id="sensor-source" class="pill pill--muted">Awaiting data</span>
+        <span id="sensor-last-seen" class="pill">No readings yet</span>
+      </div>
+    </div>
+
+    <div id="sensor-stats" class="stat-grid" hidden></div>
+
+    <div id="sensor-empty" class="empty-state">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 4-6"/></svg>
+      <h3>Waiting for sensor uplinks</h3>
+      <p class="muted">
+        Charts populate automatically as the selected device reports. Trigger a reading from
+        <button type="button" class="linklike js-go-tab" data-go-tab="device">Device Control</button>,
+        or move the board to wake its motion sensor.
+      </p>
+    </div>
+
+    <div id="sensor-charts" class="chart-grid" hidden></div>
+
+    <article class="panel panel-wide">
+      <details class="log-disclosure" open>
+        <summary>
+          <span class="panel-head-inline">
+            <span class="eyebrow">Server stream</span>
+            <h2>Raw Uplink Log</h2>
+          </span>
+          <span class="muted">Server-side MQTT stream, filtered to the selected device.</span>
+        </summary>
+        <div id="event-log" class="event-log"></div>
+      </details>
+    </article>
+  </section>
+
+  <!-- ====================== DEVICE CONTROL ====================== -->
+  <section class="tabpanel" data-tab-panel="device" role="tabpanel" hidden>
     <article class="panel panel-wide panel-console">
       <div class="panel-head">
-        <p class="eyebrow">Browser shell</p>
-        <h2>BLE Shell</h2>
-        <p class="muted">Connect from the phone browser over Web Bluetooth using Nordic UART Service.</p>
-        <p class="muted">The browser picker is filtered to devices advertising as <code id="ble-name-prefix">{{ page_config.webShellNamePrefix }}</code>* with the NUS service.</p>
+        <p class="eyebrow">Local link</p>
+        <h2>Device Control</h2>
+        <p class="muted">
+          Connect to the board over Web Bluetooth to trigger Sidewalk flows and check its radio links.
+          Pick a device exposing <code id="ble-name-match">{{ page_config.webShellNamePrefix }}</code>.
+        </p>
       </div>
-      <div class="stack">
-        <div class="inline-actions console-actions">
-          <button id="ble-connect" type="button">Connect BLE Shell</button>
-          <button id="ble-disconnect" type="button" class="ghost-button">Disconnect</button>
-        </div>
-        <p id="ble-status" class="muted">Disconnected</p>
-        <div class="stack">
-          <div>
-            <div class="inline-actions inline-actions--triple">
-              <button type="button" class="js-link-workflow" data-workflow="ble">sid flow send ble</button>
-              <button type="button" class="js-link-workflow" data-workflow="fsk">sid flow send fsk</button>
-              <button type="button" class="js-link-workflow" data-workflow="lora">sid flow send lora</button>
-            </div>
-            <div class="inline-actions">
-              <button type="button" class="js-shell-command ghost-button" data-command="sid flow connect">sid flow connect</button>
-              <button type="button" class="js-shell-command ghost-button" data-command="sid flow status">sid flow status</button>
-              <button type="button" class="js-shell-command ghost-button" data-command="sid flow cancel">sid flow cancel</button>
-              <button type="button" class="js-shell-command ghost-button" data-command="sid last_status">sid last_status</button>
-            </div>
-            <p id="ble-workflow-status" class="muted"></p>
-          </div>
 
-          <form id="ble-payload-form" class="stack">
-            <label>
-              <span>Payload</span>
-              <textarea
-                id="ble-payload"
-                rows="3"
-                placeholder="Hello from the Web BLE console"></textarea>
-            </label>
-            <div class="inline-fields inline-fields--triple">
-              <label>
-                <span>Link</span>
-                <select id="ble-send-link">
-                  <option value="1">BLE</option>
-                  <option value="2">FSK</option>
-                  <option value="3">LoRa</option>
-                  <option value="8" selected>Any</option>
-                </select>
-              </label>
-              <label>
-                <span>Route</span>
-                <select id="ble-link-mode">
-                  <option value="1">Cloud</option>
-                  <option value="2">Mobile</option>
-                </select>
-              </label>
-              <label>
-                <span>Type</span>
-                <select id="ble-message-type">
-                  <option value="2">Notify</option>
-                  <option value="0">Get</option>
-                  <option value="1">Set</option>
-                  <option value="3">Response</option>
-                </select>
-              </label>
-            </div>
-            <div class="inline-fields">
-              <label>
-                <span>Encoding</span>
-                <select id="ble-payload-encoding">
-                  <option value="text">UTF-8 Text</option>
-                  <option value="hex">Raw Hex</option>
-                </select>
-              </label>
-              <label>
-                <span>Preset</span>
-                <select id="ble-payload-preset">
-                  <option value="">Custom Payload</option>
-                  <option value="status">Request status</option>
-                  <option value="hello">Hello string</option>
-                  <option value="json">JSON sample</option>
-                </select>
-              </label>
-            </div>
-            <div class="inline-actions">
-              <button type="submit">Send Payload</button>
-              <button type="button" id="ble-copy-command" class="ghost-button">Copy Command to Shell</button>
-            </div>
-          </form>
+      <div class="stack device-control">
+        <div class="control-connect">
+          <div class="inline-actions console-actions">
+            <button id="ble-connect" type="button">Connect over Bluetooth</button>
+            <button id="ble-disconnect" type="button" class="ghost-button">Disconnect</button>
+          </div>
+          <p id="ble-status" class="conn-state conn-state--off">Disconnected</p>
         </div>
-        <div id="ble-terminal" class="terminal terminal-screen" aria-label="BLE shell output" role="log"></div>
-        <form id="ble-command-form" class="command-row">
-          <input
-            id="ble-command"
-            type="text"
-            placeholder="sid last_status"
-            autocomplete="off"
-            autocorrect="off"
-            autocapitalize="none"
-            inputmode="text"
-            enterkeyhint="send"
-            spellcheck="false">
-          <button type="submit">Send Command</button>
-        </form>
+
+        <div class="link-status" aria-label="Sidewalk link status">
+          <span class="link-status-label">Link status</span>
+          <span class="link-pill" id="link-pill-ble" data-state="unknown"><span class="link-dot"></span>BLE</span>
+          <span class="link-pill" id="link-pill-fsk" data-state="unknown"><span class="link-dot"></span>FSK</span>
+          <span class="link-pill" id="link-pill-lora" data-state="unknown"><span class="link-dot"></span>LoRa</span>
+          <button type="button" class="ghost-button link-refresh js-shell-command" data-command="sid flow status" data-label="Refreshing link status" title="sid flow status">Refresh</button>
+        </div>
+
+        <div class="control-actions">
+          <div>
+            <p class="control-label">Send a test message</p>
+            <div class="inline-actions inline-actions--triple">
+              <button type="button" class="js-link-workflow" data-workflow="ble" title="sid flow send ble">Send over BLE</button>
+              <button type="button" class="js-link-workflow" data-workflow="fsk" title="sid flow send fsk">Send over FSK</button>
+              <button type="button" class="js-link-workflow" data-workflow="lora" title="sid flow send lora">Send over LoRa</button>
+            </div>
+          </div>
+          <div>
+            <p class="control-label">Ask the device to report in</p>
+            <div class="inline-actions inline-actions--triple">
+              <button type="button" class="js-shell-command ghost-button" data-command="sid flow sensor ble" data-label="Read sensors" title="sid flow sensor ble">Read sensors</button>
+              <button type="button" class="js-shell-command ghost-button" data-command="sid flow power ble" data-label="Read battery" title="sid flow power ble">Read battery</button>
+              <button type="button" class="js-shell-command ghost-button" data-command="sid flow telemetry ble" data-label="Send telemetry" title="sid flow telemetry ble">Send telemetry</button>
+            </div>
+          </div>
+          <p id="ble-workflow-status" class="muted action-status">Connect to start controlling the device.</p>
+        </div>
+
         <details class="console-secondary">
-          <summary>Advanced Shell</summary>
-          <div class="inline-actions">
-            <button type="button" class="js-shell-command ghost-button" data-command="sid init 7">Init All Links</button>
-            <button type="button" class="js-shell-command ghost-button" data-command="sid start">Start</button>
-            <button type="button" class="js-shell-command ghost-button" data-command="sid stop">Stop</button>
-            <button type="button" class="js-shell-command ghost-button" data-command="sid deinit">Deinit</button>
+          <summary>Custom payload &amp; advanced commands</summary>
+          <div class="stack">
+            <form id="ble-payload-form" class="stack">
+              <label>
+                <span>Payload</span>
+                <textarea
+                  id="ble-payload"
+                  rows="3"
+                  placeholder="Hello from the Web BLE console"></textarea>
+              </label>
+              <div class="inline-fields inline-fields--triple">
+                <label>
+                  <span>Link</span>
+                  <select id="ble-send-link">
+                    <option value="1">BLE</option>
+                    <option value="2">FSK</option>
+                    <option value="3">LoRa</option>
+                    <option value="8" selected>Any</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Route</span>
+                  <select id="ble-link-mode">
+                    <option value="1">Cloud</option>
+                    <option value="2">Mobile</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Type</span>
+                  <select id="ble-message-type">
+                    <option value="2">Notify</option>
+                    <option value="0">Get</option>
+                    <option value="1">Set</option>
+                    <option value="3">Response</option>
+                  </select>
+                </label>
+              </div>
+              <div class="inline-fields">
+                <label>
+                  <span>Encoding</span>
+                  <select id="ble-payload-encoding">
+                    <option value="text">UTF-8 Text</option>
+                    <option value="hex">Raw Hex</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Preset</span>
+                  <select id="ble-payload-preset">
+                    <option value="">Custom Payload</option>
+                    <option value="status">Request status</option>
+                    <option value="hello">Hello string</option>
+                    <option value="json">JSON sample</option>
+                  </select>
+                </label>
+              </div>
+              <div class="inline-actions">
+                <button type="submit">Send Payload</button>
+                <button type="button" id="ble-copy-command" class="ghost-button">Copy Command</button>
+              </div>
+            </form>
+
+            <p class="control-label">Flow &amp; stack commands</p>
+            <div class="inline-actions inline-actions--triple">
+              <button type="button" class="js-shell-command ghost-button" data-command="sid flow connect" title="sid flow connect">Connect link</button>
+              <button type="button" class="js-shell-command ghost-button" data-command="sid flow cancel" title="sid flow cancel">Cancel flow</button>
+              <button type="button" class="js-shell-command ghost-button" data-command="sid last_status" title="sid last_status">Last status</button>
+              <button type="button" class="js-shell-command ghost-button" data-command="sid init 7" title="sid init 7">Init all links</button>
+              <button type="button" class="js-shell-command ghost-button" data-command="sid start" title="sid start">Start</button>
+              <button type="button" class="js-shell-command ghost-button" data-command="sid stop" title="sid stop">Stop</button>
+              <button type="button" class="js-shell-command ghost-button" data-command="sid deinit" title="sid deinit">Deinit</button>
+            </div>
+
+            <form id="ble-command-form" class="command-row">
+              <input
+                id="ble-command"
+                type="text"
+                placeholder="sid last_status"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="none"
+                inputmode="text"
+                enterkeyhint="send"
+                spellcheck="false">
+              <button type="submit">Send Command</button>
+            </form>
+
+            <details class="raw-disclosure">
+              <summary>Raw responses</summary>
+              <div id="ble-terminal" class="terminal terminal-screen" aria-label="BLE shell output" role="log"></div>
+            </details>
           </div>
         </details>
       </div>
     </article>
+  </section>
 
+  <!-- ====================== FLASH ====================== -->
+  <section class="tabpanel" data-tab-panel="flash" role="tabpanel" hidden>
     <article class="panel panel-wide panel-flash">
       <div class="panel-head">
         <p class="eyebrow">Probe over USB</p>
@@ -274,7 +324,10 @@
         <pre id="flash-log" class="flash-log" aria-label="WebUSB flash log" role="log"></pre>
       </div>
     </article>
+  </section>
 
+  <!-- ====================== DOWNLINK ====================== -->
+  <section class="tabpanel" data-tab-panel="downlink" role="tabpanel" hidden>
     <article class="panel panel-wide panel-downlink">
       <div class="panel-head">
         <p class="eyebrow">Cloud to device</p>

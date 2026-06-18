@@ -71,3 +71,16 @@ class DemoConfig:
     NUS_SERVICE_UUID = _env("NUS_SERVICE_UUID", "6e400001-b5a3-f393-e0a9-e50e24dcca9e")
     NUS_RX_UUID = _env("NUS_RX_UUID", "6e400002-b5a3-f393-e0a9-e50e24dcca9e")
     NUS_TX_UUID = _env("NUS_TX_UUID", "6e400003-b5a3-f393-e0a9-e50e24dcca9e")
+
+    SIDEWALK_BLE_SERVICE_UUID = _env(
+        "SIDEWALK_BLE_SERVICE_UUID",
+        "0000fe03-0000-1000-8000-00805f9b34fb",
+    )
+    SIDEWALK_BLE_WRITE_UUID = _env(
+        "SIDEWALK_BLE_WRITE_UUID",
+        "74f996c9-7d6c-4d58-9232-0427ab61c53c",
+    )
+    SIDEWALK_BLE_NOTIFY_UUID = _env(
+        "SIDEWALK_BLE_NOTIFY_UUID",
+        "b32e83c0-fece-47c1-9015-53b7e7f0d2fe",
+    )

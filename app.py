@@ -33,6 +33,9 @@ from storage import DemoStore
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
 
+DEFAULT_WEB_SHELL_NAME_MATCH = "Nordic UART or Sidewalk BLE service"
+LEGACY_WEB_SHELL_NAME_PREFIX = "XIAO-WebShell"
+
 WEB_DEMO_ROOT = Path(__file__).resolve().parent
 FLASH_IMAGE_MANIFEST = {
     "aodemo1": {
@@ -102,13 +105,17 @@ def _can_provision_firmware(user: dict) -> bool:
     return user["role"] == "admin" or bool(user.get("can_provision"))
 
 
+def _web_shell_name_match(value: str | None) -> str:
+    return DEFAULT_WEB_SHELL_NAME_MATCH
+
+
 def _device_summary(device: dict) -> dict:
     return {
         "id": device["id"],
         "name": device["name"],
         "wirelessDeviceId": device["wireless_device_id"],
         "uplinkTopic": device["uplink_topic"],
-        "bleNamePrefix": device.get("ble_name_prefix") or "XIAO-WebShell",
+        "bleNamePrefix": _web_shell_name_match(device.get("ble_name_prefix")),
         "customerName": device.get("customer_name") or "",
         "customerEmail": device.get("customer_email") or "",
     }
@@ -258,7 +265,10 @@ def dashboard():
         "nusServiceUuid": DemoConfig.NUS_SERVICE_UUID,
         "nusRxUuid": DemoConfig.NUS_RX_UUID,
         "nusTxUuid": DemoConfig.NUS_TX_UUID,
-        "webShellNamePrefix": (selected_device or {}).get("ble_name_prefix", "XIAO-WebShell"),
+        "sidewalkBleServiceUuid": DemoConfig.SIDEWALK_BLE_SERVICE_UUID,
+        "sidewalkBleWriteUuid": DemoConfig.SIDEWALK_BLE_WRITE_UUID,
+        "sidewalkBleNotifyUuid": DemoConfig.SIDEWALK_BLE_NOTIFY_UUID,
+        "webShellNamePrefix": DEFAULT_WEB_SHELL_NAME_MATCH,
         "adminUrl": url_for("admin") if user["role"] == "admin" else "",
         "canProvisionFirmware": _can_provision_firmware(user),
         "mfgStorageAddress": DemoConfig.SIDEWALK_MFG_STORAGE_ADDRESS,
@@ -387,7 +397,7 @@ def import_device():
     description = request.form.get("description", "").strip()
     destination_name = request.form.get("destination_name", "").strip()
     uplink_topic = request.form.get("uplink_topic", "").strip()
-    ble_name_prefix = request.form.get("ble_name_prefix", "").strip() or "XIAO-WebShell"
+    ble_name_prefix = request.form.get("ble_name_prefix", "").strip() or DEFAULT_WEB_SHELL_NAME_MATCH
 
     if not name or not wireless_device_id:
         flash("Imported devices need a name and WirelessDeviceId.", "error")
@@ -438,7 +448,7 @@ def create_device():
     uplink_topic = request.form.get("uplink_topic", "").strip()
     name = request.form.get("name", "").strip()
     description = request.form.get("description", "").strip()
-    ble_name_prefix = request.form.get("ble_name_prefix", "").strip() or "XIAO-WebShell"
+    ble_name_prefix = request.form.get("ble_name_prefix", "").strip() or DEFAULT_WEB_SHELL_NAME_MATCH
 
     if not all((name, destination_name, device_profile_id, uplink_topic)):
         flash("AWS Sidewalk device creation requires name, destination, profile ID, and uplink topic.", "error")
