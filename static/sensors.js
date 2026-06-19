@@ -64,9 +64,29 @@
     }
 
     push(t, values) {
-      this.points.push({ t, values });
+      if (typeof t !== "number" || !isFinite(t)) {
+        return;
+      }
+
+      const cleanValues = {};
+      for (const s of this.series) {
+        const v = values ? values[s.key] : null;
+        if (typeof v === "number" && isFinite(v)) {
+          cleanValues[s.key] = v;
+        }
+      }
+      if (Object.keys(cleanValues).length === 0) {
+        return;
+      }
+
+      const idx = this._pointIndex(t);
+      if (idx < this.points.length && this.points[idx].t === t) {
+        this.points[idx].values = { ...this.points[idx].values, ...cleanValues };
+      } else {
+        this.points.splice(idx, 0, { t, values: cleanValues });
+      }
       if (this.points.length > this.maxPoints) {
-        this.points.shift();
+        this.points.splice(0, this.points.length - this.maxPoints);
       }
       this.scheduleDraw();
     }
@@ -81,6 +101,20 @@
         return this.points[i];
       }
       return null;
+    }
+
+    _pointIndex(t) {
+      let lo = 0;
+      let hi = this.points.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (this.points[mid].t < t) {
+          lo = mid + 1;
+        } else {
+          hi = mid;
+        }
+      }
+      return lo;
     }
 
     scheduleDraw() {
@@ -679,6 +713,8 @@
         return;
       }
 
+      const updatesLatest = sample.t >= this.lastSampleTs;
+
       for (const def of CHART_DEFS) {
         const values = def.get(sample);
         if (!values) {
@@ -689,7 +725,7 @@
           chart.push(sample.t, values);
         }
         const latestNode = this.chartLatestNodes.get(def.id);
-        if (latestNode) {
+        if (updatesLatest && latestNode) {
           if (def.series.length > 1) {
             latestNode.textContent = def.series
               .map((s) => `${s.label} ${fmtValue(values[s.key], def.decimals)}`)
@@ -700,29 +736,31 @@
         }
       }
 
-      for (const def of STAT_DEFS) {
-        const raw = def.get(sample);
-        const node = this.statNodes.get(def.id);
-        if (!node || raw == null) {
-          continue;
+      if (updatesLatest) {
+        for (const def of STAT_DEFS) {
+          const raw = def.get(sample);
+          const node = this.statNodes.get(def.id);
+          if (!node || raw == null) {
+            continue;
+          }
+          if (def.kind === "bool") {
+            node.value.textContent = raw ? def.on : def.off;
+            node.tile.classList.toggle("stat-tile--on", !!raw);
+            node.tile.classList.toggle("stat-tile--off", !raw);
+          } else {
+            node.value.textContent = fmtValue(raw, def.decimals);
+          }
         }
-        if (def.kind === "bool") {
-          node.value.textContent = raw ? def.on : def.off;
-          node.tile.classList.toggle("stat-tile--on", !!raw);
-          node.tile.classList.toggle("stat-tile--off", !raw);
-        } else {
-          node.value.textContent = fmtValue(raw, def.decimals);
-        }
-      }
 
-      this.lastSampleTs = sample.t;
-      if (this.els.lastSeen) {
-        const link = sample.linkName ? ` · ${sample.linkName}` : "";
-        this.els.lastSeen.textContent = `Last reading ${fmtTime(sample.t)}${link}`;
-      }
-      if (this.els.sourceChip && sample.source) {
-        const labels = { telemetry: "JSON telemetry", notify: "Binary notify", button: "Button event" };
-        this.els.sourceChip.textContent = labels[sample.source] || sample.source;
+        this.lastSampleTs = sample.t;
+        if (this.els.lastSeen) {
+          const link = sample.linkName ? ` · ${sample.linkName}` : "";
+          this.els.lastSeen.textContent = `Last reading ${fmtTime(sample.t)}${link}`;
+        }
+        if (this.els.sourceChip && sample.source) {
+          const labels = { telemetry: "JSON telemetry", notify: "Binary notify", button: "Button event" };
+          this.els.sourceChip.textContent = labels[sample.source] || sample.source;
+        }
       }
 
       if (!this.hasData) {

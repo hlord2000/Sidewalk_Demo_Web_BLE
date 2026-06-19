@@ -334,7 +334,7 @@ class DemoStore:
                 SELECT ts, link_name, payload_json, payload_hex
                 FROM sensor_readings
                 WHERE wireless_device_id = ? AND ts >= ?
-                ORDER BY ts DESC
+                ORDER BY ts DESC, created_at DESC, rowid DESC
                 LIMIT ?
                 """,
                 (wireless_device_id, since_iso, limit),
