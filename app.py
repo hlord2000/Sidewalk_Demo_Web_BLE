@@ -134,7 +134,29 @@ def _web_shell_name_match(value: str | None) -> str:
     return DEFAULT_WEB_SHELL_NAME_MATCH
 
 
+def _device_sidewalk_smsn(device: dict) -> str:
+    wireless_device_json = device.get("wireless_device_json") or {}
+    provisioning_json = device.get("provisioning_json") or {}
+    raw_smsn = (
+        (wireless_device_json.get("Sidewalk") or {}).get("SidewalkManufacturingSn")
+        or (provisioning_json.get("metadata") or {}).get("smsn")
+        or ""
+    )
+    if not isinstance(raw_smsn, str):
+        return ""
+
+    compact_smsn = "".join(character for character in raw_smsn if character not in ":- \t\r\n")
+    if len(compact_smsn) != 64:
+        return ""
+    try:
+        bytes.fromhex(compact_smsn)
+    except ValueError:
+        return ""
+    return compact_smsn.upper()
+
+
 def _device_summary(device: dict) -> dict:
+    sidewalk_smsn = _device_sidewalk_smsn(device)
     return {
         "id": device["id"],
         "name": device["name"],
@@ -143,6 +165,8 @@ def _device_summary(device: dict) -> dict:
         "bleNamePrefix": _web_shell_name_match(device.get("ble_name_prefix")),
         "customerName": device.get("customer_name") or "",
         "customerEmail": device.get("customer_email") or "",
+        "sidewalkSmsn": sidewalk_smsn,
+        "identityFingerprint": sidewalk_smsn[:16],
     }
 
 
@@ -353,6 +377,47 @@ def firmware_image(image_id: str):
     )
 
 
+@app.get("/api/device-identity")
+@login_required
+def device_identity():
+    user = current_user()
+    assert user is not None
+
+    try:
+        device_id = int(request.args.get("device", ""))
+    except ValueError:
+        return jsonify({"ok": False, "error": "Select a valid device first"}), 400
+
+    device = store.get_device_for_user(user, device_id)
+    if device is None:
+        return jsonify({"ok": False, "error": "Device not found"}), 404
+
+    summary = _device_summary(device)
+    if not summary["sidewalkSmsn"]:
+        try:
+            wireless_device_json = cloud_service.fetch_wireless_device_json(
+                device["wireless_device_id"]
+            )
+            store.update_device_artifacts(
+                device["id"],
+                wireless_device_json=wireless_device_json,
+                device_profile_json=device.get("device_profile_json"),
+                provisioning_json=device.get("provisioning_json"),
+            )
+            device["wireless_device_json"] = wireless_device_json
+            summary = _device_summary(device)
+        except Exception as exc:
+            LOGGER.exception("Failed to fetch Sidewalk identity for device %s", device["id"])
+            return jsonify({"ok": False, "error": str(exc)}), 502
+
+    if not summary["sidewalkSmsn"]:
+        return jsonify(
+            {"ok": False, "error": "AWS did not return a Sidewalk manufacturing serial"}
+        ), 404
+
+    return jsonify({"ok": True, "device": summary})
+
+
 @app.get("/admin")
 @admin_required
 def admin():
@@ -484,6 +549,9 @@ def create_device():
             name=name,
             description=description,
             destination_name=destination_name,
+            location_destination_name=(
+                app.config["SIDEWALK_LOCATION_DESTINATION_NAME"] or destination_name
+            ),
             device_profile_id=device_profile_id,
         )
         wireless_device_json, device_profile_json, provisioning_json = cloud_service.refresh_device_artifacts(
@@ -513,6 +581,24 @@ def create_device():
 
     _sync_topics()
     flash(f"Created AWS Sidewalk device {name}.", "success")
+    return redirect(url_for("admin"))
+
+
+@app.post("/admin/devices/<int:device_id>/name")
+@admin_required
+def rename_device(device_id: int):
+    device = store.get_device(device_id)
+    if device is None:
+        flash("Device not found.", "error")
+        return redirect(url_for("admin"))
+
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("Device name is required.", "error")
+        return redirect(url_for("admin"))
+
+    store.update_device_name(device_id, name)
+    flash(f"Renamed {device['name']} to {name}.", "success")
     return redirect(url_for("admin"))
 
 
@@ -663,14 +749,23 @@ def events():
         if selected:
             selected_wireless_id = selected["wireless_device_id"]
 
-    listener, history = broker.open_stream()
+    try:
+        after_event_id = max(0, int(request.args.get("since", "0")))
+    except ValueError:
+        after_event_id = 0
+
+    def encode_event(event: dict) -> str:
+        event_id = int(event.get("_event_id", 0))
+        payload = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+        return f"id: {event_id}\ndata: {payload}\n\n"
 
     def stream():
+        listener, history = broker.open_stream(after_event_id)
         try:
             yield "retry: 3000\n\n"
             for event in history:
                 if _event_visible(event, allowed_wireless_ids, selected_wireless_id or None):
-                    yield f"data: {json.dumps(event)}\n\n"
+                    yield encode_event(event)
             while True:
                 try:
                     event = listener.get(timeout=20)
@@ -678,7 +773,7 @@ def events():
                     yield "event: ping\ndata: {}\n\n"
                     continue
                 if _event_visible(event, allowed_wireless_ids, selected_wireless_id or None):
-                    yield f"data: {json.dumps(event)}\n\n"
+                    yield encode_event(event)
         finally:
             broker.close_stream(listener)
 

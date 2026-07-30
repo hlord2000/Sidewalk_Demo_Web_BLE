@@ -8,7 +8,7 @@ Type=simple
 User=www-data
 WorkingDirectory=/opt/ncs/sdks/ncs-sdk-sidewalk/sdk-sidewalk/tools/web_demo
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/ncs/sdks/ncs-sdk-sidewalk/sdk-sidewalk/tools/web_demo/.venv/bin/gunicorn --bind 0.0.0.0:8000 --worker-class gthread --threads 8 --timeout 0 app:app
+ExecStart=/opt/ncs/sdks/ncs-sdk-sidewalk/sdk-sidewalk/tools/web_demo/.venv/bin/gunicorn --bind 0.0.0.0:8000 --workers 1 --worker-class gthread --threads 64 --worker-connections 128 --timeout 0 app:app
 Restart=always
 RestartSec=3
 

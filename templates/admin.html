@@ -137,6 +137,19 @@
 
         <div class="entity-actions">
           <details class="menu">
+            <summary class="ghost-button menu-summary">Rename</summary>
+            <div class="menu-panel">
+              <form method="post" action="{{ url_for('rename_device', device_id=device.id) }}" class="stack menu-form">
+                <label>
+                  <span>Device name</span>
+                  <input type="text" name="name" value="{{ device.name }}" required>
+                </label>
+                <button type="submit">Save name</button>
+              </form>
+            </div>
+          </details>
+
+          <details class="menu">
             <summary class="ghost-button menu-summary">Assign customers</summary>
             <div class="menu-panel">
               <form method="post" action="{{ url_for('assign_device', device_id=device.id) }}" class="stack menu-form">

@@ -6,6 +6,7 @@ Flask web app for a Sidewalk device demo:
 - Sidewalk cloud downlink sends via AWS IoT Wireless
 - live uplink monitoring via AWS IoT MQTT over SSE
 - Web Bluetooth shell over Nordic UART Service
+- browser controls for Sidewalk Location scans and reports
 
 ## Repo Layout
 
@@ -47,6 +48,7 @@ Set these at minimum:
 - `AWS_SECRET_ACCESS_KEY`
 - `AWS_IOT_ENDPOINT`
 - `AWS_IOT_UPLINK_TOPIC`
+- `AWS_IOT_LOCATION_TOPIC`
 - `SIDEWALK_WIRELESS_DEVICE_ID`
 
 Usually keep these too:
@@ -54,6 +56,7 @@ Usually keep these too:
 - `AWS_REGION=us-east-1`
 - `SESSION_COOKIE_SECURE=true`
 - `MQTT_CLIENT_ID=sidewalk-web-demo`
+- `SIDEWALK_LOCATION_DESTINATION_NAME=<AWS location destination>`
 
 The NUS UUIDs already default to Nordic UART Service and usually do not need changes.
 
@@ -84,7 +87,12 @@ Railway can deploy this directly from GitHub. `railway.json` already sets:
 - `/healthz` health check
 - restart-on-failure policy
 
-Keep this as a single app worker for now. The MQTT uplink listener runs in-process, so multiple gunicorn workers would create duplicate subscriptions and duplicate SSE events.
+Keep this as a single app worker for now. The MQTT uplink listener runs in-process,
+so multiple gunicorn workers would create duplicate subscriptions and split SSE
+events between processes. The configured threaded worker supports many concurrent
+SSE viewers, reconnects resume from the last event cursor instead of replaying the
+whole backlog, and SQLite uses WAL mode with a busy timeout for concurrent reads
+and writes.
 
 Deploy flow:
 

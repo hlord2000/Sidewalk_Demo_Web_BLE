@@ -4,7 +4,7 @@
     "builder": "RAILPACK"
   },
   "deploy": {
-    "startCommand": "sh -c 'gunicorn --bind 0.0.0.0:${PORT} --worker-class gthread --threads 8 --timeout 0 app:app'",
+    "startCommand": "sh -c 'gunicorn --bind 0.0.0.0:${PORT} --workers 1 --worker-class gthread --threads 64 --worker-connections 128 --timeout 0 app:app'",
     "healthcheckPath": "/healthz",
     "healthcheckTimeout": 120,
     "restartPolicyType": "ON_FAILURE",

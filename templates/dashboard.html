@@ -7,7 +7,7 @@
 <script defer src="{{ url_for('static', filename='vendor/dap.umd.js', v='20260423webusb') }}"></script>
 <script defer src="{{ url_for('static', filename='ui.js', v='20260618loop') }}"></script>
 <script defer src="{{ url_for('static', filename='sensors.js', v='20260618tsfix') }}"></script>
-<script defer src="{{ url_for('static', filename='app.js', v='20260618hist') }}"></script>
+<script defer src="{{ url_for('static', filename='app.js', v='20260730bledebug2') }}"></script>
 {% endblock %}
 {% block body %}
 <main class="page-shell app-shell">
@@ -63,6 +63,9 @@
         {% else %}
         No uplink topic configured
         {% endif %}
+      </span>
+      <span id="connected-device-chip">
+        <span class="meta-key">BLE</span> not connected
       </span>
     </div>
   </section>
@@ -139,10 +142,18 @@
       <div class="stack device-control">
         <div class="control-connect">
           <div class="inline-actions console-actions">
+            <button id="ble-scan" type="button" class="ghost-button">Scan Nearby</button>
             <button id="ble-connect" type="button">Connect</button>
             <button id="ble-disconnect" type="button" class="ghost-button">Disconnect</button>
           </div>
           <p id="ble-status" class="conn-state conn-state--off">Disconnected</p>
+          <div id="ble-nearby" class="ble-nearby" hidden>
+            <div class="ble-nearby-head">
+              <span class="meta-key">Nearby WebShells</span>
+              <span id="ble-scan-status" class="muted">Not scanning</span>
+            </div>
+            <div id="ble-nearby-list" class="ble-nearby-list"></div>
+          </div>
         </div>
 
         <div class="link-status" aria-label="Sidewalk link status">
@@ -173,6 +184,25 @@
               <button type="button" class="js-shell-command ghost-button" data-command="sid flow power ble" data-label="Read battery" title="sid flow power ble">Battery</button>
               <button type="button" class="js-shell-command ghost-button" data-command="sid flow telemetry ble" data-label="Send telemetry" title="sid flow telemetry ble">Telemetry</button>
             </div>
+          </div>
+          <div class="location-control">
+            <div class="location-control-head">
+              <div>
+                <p class="control-label">Sidewalk Location through AWS IoT</p>
+                <p class="muted location-note">
+                  The XIAO reports nearby Sidewalk gateway data. AWS IoT resolves it
+                  and returns the board's approximate location here.
+                </p>
+              </div>
+            </div>
+            <div class="inline-actions inline-actions--location">
+              <button type="button" class="js-location-action" data-location-action="locate">
+                Locate through AWS Sidewalk
+              </button>
+            </div>
+            <p id="location-status" class="muted action-status" aria-live="polite">
+              Connect to the WebShell to request an AWS Sidewalk location.
+            </p>
           </div>
           <p id="ble-workflow-status" class="muted action-status">Connect to send commands.</p>
         </div>

@@ -85,6 +85,54 @@ def _link_name(link_type: Any) -> str:
     return names.get(link_type, str(link_type))
 
 
+def _location_event(message: Any, topic: str) -> dict[str, Any] | None:
+    if not isinstance(message, dict) or message.get("type") != "Point":
+        return None
+
+    coordinates = message.get("coordinates")
+    wireless_device_id = message.get("WirelessDeviceId")
+    if (
+        not isinstance(coordinates, list)
+        or len(coordinates) < 2
+        or not isinstance(wireless_device_id, str)
+        or not wireless_device_id
+    ):
+        return None
+
+    longitude, latitude = coordinates[:2]
+    if (
+        isinstance(longitude, bool)
+        or isinstance(latitude, bool)
+        or not isinstance(longitude, (int, float))
+        or not isinstance(latitude, (int, float))
+        or not -180 <= longitude <= 180
+        or not -90 <= latitude <= 90
+    ):
+        return None
+
+    properties = message.get("properties")
+    if not isinstance(properties, dict):
+        properties = {}
+
+    altitude = coordinates[2] if len(coordinates) > 2 else None
+    if isinstance(altitude, bool) or not isinstance(altitude, (int, float)):
+        altitude = None
+
+    return {
+        "type": "location",
+        "topic": topic,
+        "wireless_device_id": wireless_device_id,
+        "longitude": longitude,
+        "latitude": latitude,
+        "altitude": altitude,
+        "measurement_type": properties.get("measurementType"),
+        "horizontal_accuracy": properties.get("horizontalAccuracy"),
+        "vertical_accuracy": properties.get("verticalAccuracy"),
+        "resolved_at": properties.get("timestamp"),
+        "raw_message": message,
+    }
+
+
 def _get_signing_value(items: list[dict[str, Any]], alg: str) -> str:
     for item in items or []:
         if item.get("SigningAlg") == alg:
@@ -141,6 +189,7 @@ class EventBroker:
         self._listeners: set[queue.Queue] = set()
         self._hooks: list[Callable[[dict[str, Any]], None]] = []
         self._lock = threading.Lock()
+        self._next_event_id = 1
 
     def add_hook(self, hook: Callable[[dict[str, Any]], None]) -> None:
         """Register a server-side callback run once per published event.
@@ -148,21 +197,25 @@ class EventBroker:
         Unlike SSE listeners (per connected browser), hooks fire regardless of
         who is watching — used to persist uplinks to the database.
         """
-        self._hooks.append(hook)
+        with self._lock:
+            self._hooks.append(hook)
 
     def publish(self, event: dict[str, Any]) -> None:
         event = dict(event)
         event.setdefault("ts", utc_now_iso())
 
-        for hook in self._hooks:
+        with self._lock:
+            event["_event_id"] = self._next_event_id
+            self._next_event_id += 1
+            self._history.append(event)
+            hooks = list(self._hooks)
+            listeners = list(self._listeners)
+
+        for hook in hooks:
             try:
                 hook(event)
             except Exception:
                 LOGGER.warning("Event hook failed", exc_info=True)
-
-        with self._lock:
-            self._history.append(event)
-            listeners = list(self._listeners)
 
         for listener in listeners:
             try:
@@ -177,11 +230,18 @@ class EventBroker:
                 except queue.Full:
                     LOGGER.warning("Dropping SSE event for a slow listener")
 
-    def open_stream(self) -> tuple[queue.Queue, list[dict[str, Any]]]:
+    def open_stream(self, after_event_id: int = 0) -> tuple[queue.Queue, list[dict[str, Any]]]:
         listener: queue.Queue = queue.Queue(maxsize=32)
         with self._lock:
             self._listeners.add(listener)
-            history = list(self._history)
+            latest_event_id = self._next_event_id - 1
+            if after_event_id > latest_event_id:
+                after_event_id = 0
+            history = [
+                event
+                for event in self._history
+                if int(event.get("_event_id", 0)) > after_event_id
+            ]
         return listener, history
 
     def close_stream(self, listener: queue.Queue) -> None:
@@ -240,6 +300,9 @@ class SidewalkCloudService:
         default_topic = self._config.AWS_IOT_UPLINK_TOPIC
         if default_topic and not str(default_topic).startswith(PLACEHOLDER_PREFIX):
             normalized.add(default_topic)
+        location_topic = self._config.AWS_IOT_LOCATION_TOPIC
+        if location_topic and not str(location_topic).startswith(PLACEHOLDER_PREFIX):
+            normalized.add(location_topic)
 
         with self._lock:
             self._desired_topics = normalized
@@ -317,6 +380,7 @@ class SidewalkCloudService:
         name: str,
         description: str,
         destination_name: str,
+        location_destination_name: str,
         device_profile_id: str,
     ) -> dict[str, Any]:
         if self._iot_client is None:
@@ -327,8 +391,12 @@ class SidewalkCloudService:
             Name=name,
             Description=description or "",
             DestinationName=destination_name,
+            Positioning="Enabled",
             ClientRequestToken=str(uuid4()),
-            Sidewalk={"DeviceProfileId": device_profile_id},
+            Sidewalk={
+                "DeviceProfileId": device_profile_id,
+                "Positioning": {"DestinationName": location_destination_name},
+            },
         )
 
         return {
@@ -491,6 +559,11 @@ class SidewalkCloudService:
             message = json.loads(raw_text)
         except json.JSONDecodeError:
             self._broker.publish({"type": "uplink_raw", "topic": topic, "raw": raw_text})
+            return
+
+        location = _location_event(message, topic)
+        if location is not None:
+            self._broker.publish(location)
             return
 
         payload_data = message.get("PayloadData")

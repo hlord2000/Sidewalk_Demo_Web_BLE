@@ -11,14 +11,19 @@ const deviceSelector = document.getElementById("device-selector");
 const sensorRangeSelect = document.getElementById("sensor-range");
 const selectedDeviceChip = document.getElementById("selected-device-chip");
 const selectedTopicChip = document.getElementById("selected-topic-chip");
+const connectedDeviceChip = document.getElementById("connected-device-chip");
 const bleNameMatchLabel = document.getElementById("ble-name-match");
 
 const bleStatus = document.getElementById("ble-status");
 const bleTerminal = document.getElementById("ble-terminal");
 const bleCommandForm = document.getElementById("ble-command-form");
 const bleCommandInput = document.getElementById("ble-command");
+const bleScanButton = document.getElementById("ble-scan");
 const bleConnectButton = document.getElementById("ble-connect");
 const bleDisconnectButton = document.getElementById("ble-disconnect");
+const bleNearby = document.getElementById("ble-nearby");
+const bleNearbyList = document.getElementById("ble-nearby-list");
+const bleScanStatus = document.getElementById("ble-scan-status");
 const blePayloadForm = document.getElementById("ble-payload-form");
 const blePayloadInput = document.getElementById("ble-payload");
 const bleSendLinkInput = document.getElementById("ble-send-link");
@@ -30,6 +35,8 @@ const bleCopyCommandButton = document.getElementById("ble-copy-command");
 const bleShortcutButtons = Array.from(document.querySelectorAll(".js-shell-command"));
 const bleWorkflowButtons = Array.from(document.querySelectorAll(".js-link-workflow"));
 const bleWorkflowStatus = document.getElementById("ble-workflow-status");
+const locationButtons = Array.from(document.querySelectorAll(".js-location-action"));
+const locationStatus = document.getElementById("location-status");
 const linkPills = {
   ble: document.getElementById("link-pill-ble"),
   fsk: document.getElementById("link-pill-fsk"),
@@ -56,6 +63,8 @@ const textDecoder = new TextDecoder("utf-8");
 const devices = config.devices || [];
 const deviceMap = new Map(devices.map((device) => [String(device.id), device]));
 const deviceByWirelessId = new Map(devices.map((device) => [device.wirelessDeviceId, device]));
+const deviceBySmsn = new Map();
+const deviceByFingerprint = new Map();
 const firmwareImages = config.firmwareImages || [];
 const firmwareImageMap = new Map(firmwareImages.map((image) => [image.id, image]));
 const DEFAULT_BLE_WORKFLOW_STATUS = "Connect to send commands.";
@@ -66,6 +75,13 @@ const DEFAULT_NUS_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 const DEFAULT_SIDEWALK_BLE_SERVICE_UUID = "0000fe03-0000-1000-8000-00805f9b34fb";
 const DEFAULT_SIDEWALK_BLE_WRITE_UUID = "74f996c9-7d6c-4d58-9232-0427ab61c53c";
 const DEFAULT_SIDEWALK_BLE_NOTIFY_UUID = "b32e83c0-fece-47c1-9015-53b7e7f0d2fe";
+const BLE_IDENTITY_COMPANY_ID = 0x0059;
+const BLE_IDENTITY_FORMAT_VERSION = 0x01;
+const BLE_IDENTITY_FINGERPRINT_BYTES = 8;
+const BLE_IDENTITY_TIMEOUT_MS = 6000;
+const BLE_SCAN_DURATION_MS = 8000;
+const MAX_EVENT_LOG_ITEMS = 80;
+const BLE_DEBUG_PREFIX = "[Sidewalk BLE]";
 const BLE_PROFILES = [
   {
     id: "nus",
@@ -85,9 +101,132 @@ const BLE_PROFILES = [
   },
 ].filter((profile) => profile.serviceUuid && profile.writeUuid && profile.notifyUuid);
 
-function bleRequestFilters() {
-  const services = Array.from(new Set(BLE_PROFILES.map((profile) => profile.serviceUuid)));
-  return services.map((serviceUuid) => ({ services: [serviceUuid] }));
+function bleDebug(step, details = undefined) {
+  const timestamp = new Date().toISOString();
+  if (details === undefined) {
+    console.info(BLE_DEBUG_PREFIX, timestamp, step);
+    return;
+  }
+  console.info(BLE_DEBUG_PREFIX, timestamp, step, details);
+}
+
+function bleDebugError(step, error, details = undefined) {
+  console.error(BLE_DEBUG_PREFIX, new Date().toISOString(), step, {
+    name: error && error.name ? error.name : "Error",
+    message: error && error.message ? error.message : String(error),
+    details,
+  });
+}
+
+bleDebug("Web Bluetooth capabilities", {
+  secureContext: window.isSecureContext,
+  bluetooth: Boolean(navigator.bluetooth),
+  requestDevice: Boolean(navigator.bluetooth && navigator.bluetooth.requestDevice),
+  requestLEScan: Boolean(navigator.bluetooth && navigator.bluetooth.requestLEScan),
+  getDevices: Boolean(navigator.bluetooth && navigator.bluetooth.getDevices),
+});
+if (navigator.bluetooth && navigator.bluetooth.getAvailability) {
+  navigator.bluetooth.getAvailability()
+    .then((available) => bleDebug("Bluetooth adapter availability", { available }))
+    .catch((error) => bleDebugError("Bluetooth adapter availability failed", error));
+}
+
+function normalizeIdentityHex(value, expectedBytes = null) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const normalized = value.replace(/[^0-9a-f]/gi, "").toUpperCase();
+  if (expectedBytes !== null && normalized.length !== expectedBytes * 2) {
+    return "";
+  }
+  return normalized;
+}
+
+function indexDeviceIdentity(device) {
+  const smsn = normalizeIdentityHex(device.sidewalkSmsn, 32);
+  const fingerprint = normalizeIdentityHex(
+    device.identityFingerprint || smsn.slice(0, BLE_IDENTITY_FINGERPRINT_BYTES * 2),
+    BLE_IDENTITY_FINGERPRINT_BYTES,
+  );
+  device.sidewalkSmsn = smsn;
+  device.identityFingerprint = fingerprint;
+  if (smsn) {
+    deviceBySmsn.set(smsn, device);
+  }
+  if (fingerprint) {
+    if (!deviceByFingerprint.has(fingerprint)) {
+      deviceByFingerprint.set(fingerprint, device);
+    } else if (deviceByFingerprint.get(fingerprint) !== device) {
+      deviceByFingerprint.set(fingerprint, null);
+    }
+  }
+}
+
+for (const device of devices) {
+  indexDeviceIdentity(device);
+}
+
+function hexToBytes(value) {
+  const normalized = normalizeIdentityHex(value);
+  if (!normalized || normalized.length % 2 !== 0) {
+    return new Uint8Array();
+  }
+  const bytes = new Uint8Array(normalized.length / 2);
+  for (let index = 0; index < bytes.length; index++) {
+    bytes[index] = Number.parseInt(normalized.slice(index * 2, index * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+function identityManufacturerFilter(fingerprint, includeFingerprint = true) {
+  const prefix = includeFingerprint
+    ? new Uint8Array([
+        BLE_IDENTITY_FORMAT_VERSION,
+        ...hexToBytes(fingerprint),
+      ])
+    : new Uint8Array([BLE_IDENTITY_FORMAT_VERSION]);
+  return {
+    companyIdentifier: BLE_IDENTITY_COMPANY_ID,
+    dataPrefix: prefix,
+  };
+}
+
+function bleRequestFilters(device) {
+  if (!device || !device.identityFingerprint) {
+    return [];
+  }
+  const filters = [{
+    manufacturerData: [identityManufacturerFilter(device.identityFingerprint)],
+  }];
+  bleDebug("Built exact identity chooser filter", {
+    awsDevice: device.name,
+    wirelessDeviceId: device.wirelessDeviceId,
+    companyIdentifier: `0x${BLE_IDENTITY_COMPANY_ID.toString(16).padStart(4, "0")}`,
+    manufacturerDataPrefix: `${BLE_IDENTITY_FORMAT_VERSION
+      .toString(16)
+      .padStart(2, "0")}${device.identityFingerprint}`,
+    optionalServices: BLE_PROFILES.map((profile) => profile.serviceUuid),
+  });
+  return filters;
+}
+
+function bleAssignedDeviceFilters() {
+  const fingerprints = new Set();
+  const filters = [];
+  for (const device of devices) {
+    if (!device.identityFingerprint || fingerprints.has(device.identityFingerprint)) {
+      continue;
+    }
+    fingerprints.add(device.identityFingerprint);
+    filters.push({
+      manufacturerData: [identityManufacturerFilter(device.identityFingerprint)],
+    });
+  }
+  bleDebug("Built assigned-device chooser filters", {
+    deviceCount: filters.length,
+    fingerprints: Array.from(fingerprints),
+  });
+  return filters;
 }
 
 const ANSI_COLORS = [
@@ -559,6 +698,12 @@ let bleServer = null;
 let bleRxCharacteristic = null;
 let bleTxCharacteristic = null;
 let bleConnectedProfile = null;
+let bleIdentifiedDevice = null;
+let bleIdentityWait = null;
+let bleScan = null;
+let bleScanStopTimer = null;
+let bleAdvertisementListenerInstalled = false;
+const bleNearbyDevices = new Map();
 let eventSource = null;
 let eventReconnectTimer = null;
 let eventReconnectDelay = 1000;
@@ -1325,11 +1470,291 @@ function currentDevice() {
   return deviceMap.get(deviceSelector.value) || null;
 }
 
+async function ensureDeviceIdentity(device) {
+  if (!device) {
+    throw new Error("Select an AWS Sidewalk device first");
+  }
+  if (device.identityFingerprint && device.sidewalkSmsn) {
+    return device;
+  }
+
+  const params = new URLSearchParams({ device: String(device.id) });
+  const response = await fetch(`/api/device-identity?${params.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+  const result = await response.json();
+  if (!response.ok || !result.ok || !result.device) {
+    throw new Error(result.error || "Could not load the selected device identity from AWS");
+  }
+
+  Object.assign(device, result.device);
+  indexDeviceIdentity(device);
+  updateSelectedDeviceUi();
+  return device;
+}
+
+async function activateDevice(device) {
+  if (!device || !deviceSelector || deviceSelector.value === String(device.id)) {
+    return;
+  }
+
+  deviceSelector.value = String(device.id);
+  config.selectedDeviceId = device.id;
+  updateSelectedDeviceUi();
+  const url = new URL(window.location.href);
+  url.searchParams.set("device", String(device.id));
+  window.history.replaceState(null, "", url);
+  await applySensorRange();
+  connectEventStream({ resetCursor: true });
+}
+
+function updateConnectedDeviceUi(device = null) {
+  if (!connectedDeviceChip) {
+    return;
+  }
+  connectedDeviceChip.replaceChildren();
+
+  const label = document.createElement("span");
+  label.className = "meta-key";
+  label.textContent = "BLE";
+  connectedDeviceChip.append(label, document.createTextNode(" "));
+
+  if (!device) {
+    connectedDeviceChip.append(document.createTextNode("not connected"));
+    return;
+  }
+
+  const name = document.createElement("strong");
+  name.textContent = device.name;
+  const id = document.createElement("code");
+  id.textContent = device.wirelessDeviceId;
+  connectedDeviceChip.append(name, document.createTextNode(" · "), id);
+}
+
+function settleBleIdentityWait(error, device = null) {
+  if (!bleIdentityWait) {
+    return;
+  }
+  const pending = bleIdentityWait;
+  bleIdentityWait = null;
+  window.clearTimeout(pending.timer);
+  if (error) {
+    pending.reject(error);
+  } else {
+    pending.resolve(device);
+  }
+}
+
+function waitForBleIdentity() {
+  settleBleIdentityWait(new Error("Identity verification was replaced"));
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      if (bleIdentityWait && bleIdentityWait.timer === timer) {
+        bleIdentityWait = null;
+        reject(new Error("The device did not answer sid identity"));
+      }
+    }, BLE_IDENTITY_TIMEOUT_MS);
+    bleIdentityWait = { resolve, reject, timer };
+  });
+}
+
+async function bindConnectedIdentity(event) {
+  const smsn = normalizeIdentityHex(event.smsn, 32);
+  const fingerprint = normalizeIdentityHex(
+    event.fp || smsn.slice(0, BLE_IDENTITY_FINGERPRINT_BYTES * 2),
+    BLE_IDENTITY_FINGERPRINT_BYTES,
+  );
+  const device = (smsn && deviceBySmsn.get(smsn))
+    || (fingerprint && deviceByFingerprint.get(fingerprint))
+    || null;
+
+  if (!device) {
+    const error = new Error(
+      `Connected board identity ${fingerprint || "unknown"} is not assigned to this account`,
+    );
+    settleBleIdentityWait(error);
+    setBleStatus(error.message);
+    if (bleDevice && bleDevice.gatt && bleDevice.gatt.connected) {
+      bleDevice.gatt.disconnect();
+    }
+    return;
+  }
+
+  if (smsn && device.sidewalkSmsn && smsn !== device.sidewalkSmsn) {
+    const error = new Error(`Identity fingerprint collision for ${fingerprint}`);
+    settleBleIdentityWait(error);
+    if (bleDevice && bleDevice.gatt && bleDevice.gatt.connected) {
+      bleDevice.gatt.disconnect();
+    }
+    return;
+  }
+
+  bleIdentifiedDevice = device;
+  await activateDevice(device);
+  updateConnectedDeviceUi(device);
+  settleBleIdentityWait(null, device);
+}
+
+function stopBleNearbyScan() {
+  if (bleScanStopTimer) {
+    window.clearTimeout(bleScanStopTimer);
+    bleScanStopTimer = null;
+  }
+  if (bleScan && bleScan.active) {
+    bleScan.stop();
+  }
+  bleScan = null;
+  if (bleScanButton) {
+    bleScanButton.disabled = false;
+    bleScanButton.textContent = "Scan Nearby";
+  }
+}
+
+function renderNearbyDevices() {
+  if (!bleNearby || !bleNearbyList) {
+    return;
+  }
+  bleNearby.hidden = false;
+  bleNearbyList.replaceChildren();
+  const nearby = Array.from(bleNearbyDevices.values())
+    .sort((left, right) => (right.rssi ?? -999) - (left.rssi ?? -999));
+
+  if (!nearby.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "No identity advertisements received yet.";
+    bleNearbyList.append(empty);
+    return;
+  }
+
+  const selected = currentDevice();
+  for (const result of nearby) {
+    const row = document.createElement(result.device ? "button" : "div");
+    row.className = "ble-nearby-device";
+    if (result.device) {
+      row.type = "button";
+      row.title = `Select ${result.device.name}`;
+      row.addEventListener("click", () => {
+        if (!deviceSelector) {
+          return;
+        }
+        deviceSelector.value = String(result.device.id);
+        deviceSelector.dispatchEvent(new Event("change", { bubbles: true }));
+        if (bleScanStatus) {
+          bleScanStatus.textContent = `Selected ${result.device.name}`;
+        }
+        bleDebug("Selected device from passive scan", {
+          awsDevice: result.device.name,
+          wirelessDeviceId: result.device.wirelessDeviceId,
+          identityFingerprint: result.fingerprint,
+          rssi: result.rssi,
+        });
+      });
+    }
+    if (selected && result.device && selected.id === result.device.id) {
+      row.classList.add("ble-nearby-device--selected");
+    }
+
+    const description = document.createElement("span");
+    const name = document.createElement("strong");
+    name.textContent = result.device
+      ? result.device.name
+      : (result.bleName || "Unassigned Sidewalk device");
+    const identity = document.createElement("code");
+    identity.textContent = result.device
+      ? result.device.wirelessDeviceId
+      : `fingerprint ${result.fingerprint}`;
+    description.append(name, document.createTextNode(" "), identity);
+
+    const signal = document.createElement("span");
+    signal.className = "ble-nearby-signal";
+    signal.textContent = Number.isFinite(result.rssi) ? `${result.rssi} dBm` : "nearby";
+    row.append(description, signal);
+    bleNearbyList.append(row);
+  }
+}
+
+function handleBleAdvertisement(event) {
+  const manufacturerData = event.manufacturerData
+    && event.manufacturerData.get(BLE_IDENTITY_COMPANY_ID);
+  if (!manufacturerData) {
+    bleDebug("Ignored advertisement without Sidewalk identity", {
+      name: event.name || (event.device && event.device.name) || "",
+      rssi: event.rssi,
+    });
+    return;
+  }
+  const bytes = new Uint8Array(
+    manufacturerData.buffer,
+    manufacturerData.byteOffset,
+    manufacturerData.byteLength,
+  );
+  if (
+    bytes.length < 1 + BLE_IDENTITY_FINGERPRINT_BYTES
+    || bytes[0] !== BLE_IDENTITY_FORMAT_VERSION
+  ) {
+    bleDebug("Ignored malformed Sidewalk identity advertisement", {
+      name: event.name || (event.device && event.device.name) || "",
+      rssi: event.rssi,
+      manufacturerData: Array.from(bytes)
+        .map((value) => value.toString(16).padStart(2, "0"))
+        .join(""),
+    });
+    return;
+  }
+
+  const fingerprint = Array.from(bytes.slice(1, 1 + BLE_IDENTITY_FINGERPRINT_BYTES))
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("")
+    .toUpperCase();
+  bleNearbyDevices.set(fingerprint, {
+    fingerprint,
+    device: deviceByFingerprint.get(fingerprint) || null,
+    bleName: event.name || (event.device && event.device.name) || "",
+    rssi: event.rssi,
+    seenAt: Date.now(),
+  });
+  bleDebug("Received WebShell identity advertisement", {
+    name: event.name || (event.device && event.device.name) || "",
+    bluetoothDeviceId: event.device && event.device.id,
+    fingerprint,
+    awsDevice: deviceByFingerprint.get(fingerprint)?.name || null,
+    rssi: event.rssi,
+  });
+  renderNearbyDevices();
+  if (bleScanStatus) {
+    bleScanStatus.textContent = `${bleNearbyDevices.size} nearby`;
+  }
+}
+
+async function scanNearbyDevices() {
+  if (!navigator.bluetooth) {
+    throw new Error("Web Bluetooth is not available in this browser");
+  }
+  bleDebug("Scan Nearby clicked", {
+    requestLEScan: typeof navigator.bluetooth.requestLEScan === "function",
+    selectedDevice: currentDevice()?.name || null,
+  });
+  stopBleNearbyScan();
+  if (bleNearby) {
+    bleNearby.hidden = false;
+  }
+  if (bleScanStatus) {
+    bleScanStatus.textContent = "Opening Chrome's nearby chooser for assigned WebShells…";
+  }
+  renderNearbyDevices();
+  bleDebug("Using native chooser instead of experimental passive scanning");
+  return connectBleShell("scan-nearby-native", { matchAnyAssigned: true });
+}
+
 function setBleShellControlsDisabled(disabled) {
   for (const button of bleShortcutButtons) {
     button.disabled = disabled;
   }
   for (const button of bleWorkflowButtons) {
+    button.disabled = disabled;
+  }
+  for (const button of locationButtons) {
     button.disabled = disabled;
   }
   if (blePayloadForm) {
@@ -1346,9 +1771,22 @@ function updateSelectedDeviceUi() {
   const device = currentDevice();
 
   if (selectedDeviceChip) {
-    selectedDeviceChip.innerHTML = device
-      ? `<span class="meta-key">Device ID</span> <code>${device.wirelessDeviceId}</code>`
-      : "No assigned device";
+    selectedDeviceChip.replaceChildren();
+    if (device) {
+      const label = document.createElement("span");
+      label.className = "meta-key";
+      label.textContent = "Device ID";
+      const id = document.createElement("code");
+      id.textContent = device.wirelessDeviceId;
+      selectedDeviceChip.append(label, document.createTextNode(" "), id);
+      if (device.identityFingerprint) {
+        const fingerprint = document.createElement("code");
+        fingerprint.textContent = `BLE ${device.identityFingerprint}`;
+        selectedDeviceChip.append(document.createTextNode(" · "), fingerprint);
+      }
+    } else {
+      selectedDeviceChip.textContent = "No assigned device";
+    }
   }
 
   if (selectedTopicChip) {
@@ -1367,6 +1805,7 @@ function updateSelectedDeviceUi() {
 function appendTerminal(text) {
   bleShellRecentText = `${bleShellRecentText}${text}`.slice(-16000);
   updateBleSidewalkStatusFromText();
+  updateLocationStatusFromText();
   ingestDeviceEvents(text);
   bleTerminalRenderer.feed(text);
 }
@@ -1381,21 +1820,38 @@ function setBleWorkflowStatus(text) {
   }
 }
 
+function setLocationStatus(text, state = "idle") {
+  if (!locationStatus) {
+    return;
+  }
+  locationStatus.textContent = text;
+  locationStatus.dataset.state = state;
+}
+
 function setBleWorkflowButtonsDisabled(disabled) {
   for (const button of bleWorkflowButtons) {
     button.disabled = disabled;
   }
 }
 
+let locationInitialized = false;
+let locationBusy = false;
+let locationGatewayState = null;
+
 function resetBleShellState() {
+  settleBleIdentityWait(new Error("BLE disconnected before identity verification"));
   bleDevice = null;
   bleServer = null;
   bleRxCharacteristic = null;
   bleTxCharacteristic = null;
   bleConnectedProfile = null;
+  bleIdentifiedDevice = null;
   bleShellRecentText = "";
   bleEvtBuffer = "";
   bleWorkflowRunning = false;
+  locationInitialized = false;
+  locationBusy = false;
+  locationGatewayState = null;
   bleSidewalkStatus = {
     ble: null,
     fsk: null,
@@ -1404,6 +1860,8 @@ function resetBleShellState() {
   };
   setBleShellControlsDisabled(true);
   setBleWorkflowStatus(DEFAULT_BLE_WORKFLOW_STATUS);
+  setLocationStatus("Connect to the WebShell to request an AWS Sidewalk location.");
+  updateConnectedDeviceUi();
   setConnState(false);
   renderLinkStatus();
 }
@@ -1476,6 +1934,12 @@ function handleDeviceEvent(event) {
   }
 
   switch (event.t) {
+    case "identity":
+      bindConnectedIdentity(event).catch((error) => {
+        settleBleIdentityWait(error);
+        setBleStatus(`BLE identity error: ${error.message}`);
+      });
+      break;
     case "status":
       bleSidewalkStatus = {
         ble: event.ble ? "up" : "down",
@@ -1487,6 +1951,28 @@ function handleDeviceEvent(event) {
       setBleWorkflowStatus(
         `Device: ${event.reg ? "registered" : "unregistered"} · ${event.time ? "time synced" : "time not synced"}`
       );
+      break;
+    case "location":
+      if (Number(event.err) !== 0) {
+        locationGatewayState = "error";
+        setLocationStatus(`Sidewalk Location error ${event.err}.`, "error");
+      } else if (Number(event.status) === 0) {
+        locationInitialized = true;
+        locationGatewayState = "ready";
+        setLocationStatus("Nearby Sidewalk gateway supports AWS location.", "success");
+      } else if (Number(event.status) === 1) {
+        locationInitialized = true;
+        locationGatewayState = "unavailable";
+        setLocationStatus(
+          "The connected Sidewalk gateway does not provide Community Finding location.",
+          "error",
+        );
+      } else if (Number(event.status) === 2) {
+        setLocationStatus(
+          "Location report sent. Waiting for AWS IoT to resolve coordinates…",
+          "working",
+        );
+      }
       break;
     case "tx":
       setBleWorkflowStatus(`Uplink sent over the air (id ${event.v}) ✓`);
@@ -1523,6 +2009,55 @@ function updateBleSidewalkStatusFromText() {
     updatedAt: Date.now(),
   };
   renderLinkStatus();
+}
+
+function updateLocationStatusFromText() {
+  const recent = bleShellRecentText.slice(-4000);
+  const initMatches = Array.from(recent.matchAll(/location_event_init returned (-?\d+)/g));
+  const runMatches = Array.from(
+    recent.matchAll(/location_event_(scan|send) mode: (\d+), returned (-?\d+)/g),
+  );
+  const resultMatches = Array.from(recent.matchAll(/loc send result: (-?\d+)/g));
+  const latest = [
+    ...initMatches.map((match) => ({ kind: "init", match })),
+    ...runMatches.map((match) => ({ kind: "run", match })),
+    ...resultMatches.map((match) => ({ kind: "result", match })),
+  ].sort((left, right) => left.match.index - right.match.index).pop();
+
+  if (!latest) {
+    return;
+  }
+
+  if (latest.kind === "result") {
+    const result = Number(latest.match[1]);
+    setLocationStatus(
+      result === 0
+        ? "Location report sent. Waiting for AWS IoT to resolve coordinates…"
+        : `Location completed with error ${result}.`,
+      result === 0 ? "working" : "error",
+    );
+    return;
+  }
+
+  if (latest.kind === "run") {
+    const match = latest.match;
+    const action = match[1] === "scan" ? "scan" : "scan and send";
+    const result = Number(match[3]);
+    setLocationStatus(
+      result === 0
+        ? "Sidewalk location scan is running on the board…"
+        : `Location ${action} failed to start (${result}).`,
+      result === 0 ? "working" : "error",
+    );
+    return;
+  }
+
+  const result = Number(latest.match[1]);
+  locationInitialized = result === 0;
+  setLocationStatus(
+    result === 0 ? "Sidewalk Location initialized." : `Location initialization failed (${result}).`,
+    result === 0 ? "success" : "error",
+  );
 }
 
 function setEventFeedStatus(text, state) {
@@ -1579,6 +2114,19 @@ function renderEvent(event) {
     lines.push(`MessageId: ${event.message_id}`);
   }
 
+  if (event.type === "location") {
+    const coordinates = `${Number(event.latitude).toFixed(6)}, ${Number(event.longitude).toFixed(6)}`;
+    const hasAccuracy = Number.isFinite(Number(event.horizontal_accuracy));
+    const accuracy = hasAccuracy ? ` · ±${Number(event.horizontal_accuracy)} m` : "";
+    const method = event.measurement_type ? `${event.measurement_type} · ` : "";
+    lines.push(`AWS location: ${coordinates}`);
+    if (event.altitude !== null && event.altitude !== undefined) {
+      lines.push(`Altitude: ${event.altitude} m`);
+    }
+    lines.push(`Resolution: ${method}${hasAccuracy ? `±${Number(event.horizontal_accuracy)} m` : "accuracy unavailable"}`);
+    setLocationStatus(`AWS resolved ${method}${coordinates}${accuracy}.`, "success");
+  }
+
   if (event.raw) {
     lines.push(event.raw);
   }
@@ -1586,12 +2134,17 @@ function renderEvent(event) {
   card.textContent = lines.join("\n");
   eventLog.prepend(card);
   eventLog.scrollTop = 0;
+  while (eventLog.children.length > MAX_EVENT_LOG_ITEMS) {
+    eventLog.lastElementChild.remove();
+  }
   window.setTimeout(() => {
     card.classList.remove("event-card--fresh");
   }, 1200);
 }
 
-function connectEventStream() {
+let eventLastId = 0;
+
+function connectEventStream({ resetCursor = false } = {}) {
   if (eventSource) {
     eventSource.close();
     eventSource = null;
@@ -1602,11 +2155,21 @@ function connectEventStream() {
     eventReconnectTimer = null;
   }
 
+  if (resetCursor) {
+    eventLastId = 0;
+    if (eventLog) {
+      eventLog.replaceChildren();
+    }
+  }
+
   setEventFeedStatus("Connecting", "connecting");
   const params = new URLSearchParams();
   const device = currentDevice();
   if (device) {
     params.set("device", device.id);
+  }
+  if (eventLastId > 0) {
+    params.set("since", String(eventLastId));
   }
   const source = new EventSource(`/api/events?${params.toString()}`);
   eventSource = source;
@@ -1617,8 +2180,16 @@ function connectEventStream() {
   };
 
   source.onmessage = (msg) => {
-    const event = JSON.parse(msg.data);
-    renderEvent(event);
+    try {
+      const event = JSON.parse(msg.data);
+      const messageEventId = Number(msg.lastEventId || event._event_id || 0);
+      if (messageEventId > eventLastId) {
+        eventLastId = messageEventId;
+      }
+      renderEvent(event);
+    } catch (error) {
+      setEventFeedStatus("Invalid event", "error");
+    }
   };
 
   source.onerror = () => {
@@ -1785,26 +2356,135 @@ async function runBleLinkWorkflow(workflowName) {
   }
 }
 
-async function connectBleShell() {
+async function waitForSidewalkBleLink(timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (bleSidewalkStatus.ble === "up") {
+      return;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+  }
+  throw new Error("No nearby Sidewalk gateway brought the BLE link up");
+}
+
+async function waitForLocationGateway(timeoutMs = 8000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (locationGatewayState === "ready") {
+      return;
+    }
+    if (locationGatewayState === "unavailable") {
+      throw new Error(
+        "The connected Sidewalk gateway is not opted into Community Finding location",
+      );
+    }
+    if (locationGatewayState === "error") {
+      throw new Error("The board reported a Sidewalk Location error");
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+  }
+  throw new Error("Timed out checking gateway location support");
+}
+
+async function runLocationAction(action) {
+  if (!bleConnectedProfile || !bleConnectedProfile.textShell) {
+    throw new Error("Connect to the Nordic UART WebShell first");
+  }
+  if (locationBusy) {
+    throw new Error("A location action is already running");
+  }
+
+  if (action !== "locate") {
+    throw new Error(`Unknown location action: ${action}`);
+  }
+  locationBusy = true;
+  for (const button of locationButtons) {
+    button.disabled = true;
+  }
+  setLocationStatus("Sending location command…", "working");
+
+  try {
+    if (bleSidewalkStatus.ble !== "up") {
+      setLocationStatus("Starting the board's Sidewalk BLE link…", "working");
+      if (!(await runBleShellCommand("sid flow set ble"))) {
+        throw new Error("Could not start the Sidewalk BLE link");
+      }
+      await waitForSidewalkBleLink();
+    }
+
+    locationGatewayState = null;
+    await runBleShellCommand("location deinit");
+    locationInitialized = false;
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+
+    setLocationStatus("Checking gateway support for AWS location…", "working");
+    if (!(await runBleShellCommand("location init"))) {
+      throw new Error("Could not initialize Sidewalk Location");
+    }
+    await waitForLocationGateway();
+
+    if (!(await runBleShellCommand("location send"))) {
+      throw new Error("Could not request the Sidewalk location");
+    }
+    setLocationStatus(
+      "Board scan started. Waiting for AWS IoT to resolve the Sidewalk location…",
+      "working",
+    );
+  } finally {
+    locationBusy = false;
+    const locationAvailable = Boolean(bleConnectedProfile && bleConnectedProfile.textShell);
+    for (const button of locationButtons) {
+      button.disabled = !locationAvailable;
+    }
+  }
+}
+
+async function connectBleShell(source = "connect-button", { matchAnyAssigned = false } = {}) {
   if (!navigator.bluetooth) {
     setBleStatus("Web Bluetooth is not available in this browser");
     return;
   }
 
-  setBleStatus(`Choose a BLE device exposing ${BLE_DEVICE_MATCH_LABEL}...`);
+  stopBleNearbyScan();
+  const selectedDevice = await ensureDeviceIdentity(currentDevice());
+  bleDebug("Opening Web Bluetooth chooser", {
+    source,
+    matchAnyAssigned,
+    awsDevice: selectedDevice.name,
+    wirelessDeviceId: selectedDevice.wirelessDeviceId,
+    identityFingerprint: selectedDevice.identityFingerprint,
+  });
+  setBleStatus(
+    matchAnyAssigned
+      ? "Scanning for WebShells assigned to this account…"
+      : `Scanning only for ${selectedDevice.name} · ${selectedDevice.identityFingerprint}…`,
+  );
   const optionalServices = BLE_PROFILES.map((profile) => profile.serviceUuid);
-  const filters = bleRequestFilters();
+  const filters = matchAnyAssigned
+    ? bleAssignedDeviceFilters()
+    : bleRequestFilters(selectedDevice);
 
   if (!filters.length) {
-    throw new Error("No BLE services are configured for discovery");
+    throw new Error("The selected AWS device does not have an advertised BLE identity");
   }
 
-  bleDevice = await navigator.bluetooth.requestDevice({
+  const chooserOptions = {
     filters,
     optionalServices,
+  };
+  bleDebug("requestDevice options", chooserOptions);
+  bleDevice = await navigator.bluetooth.requestDevice(chooserOptions);
+  bleDebug("Chooser selected device", {
+    name: bleDevice.name,
+    bluetoothDeviceId: bleDevice.id,
+    gattConnected: Boolean(bleDevice.gatt && bleDevice.gatt.connected),
   });
 
   bleDevice.addEventListener("gattserverdisconnected", () => {
+    bleDebug("GATT disconnected", {
+      name: bleDevice && bleDevice.name,
+      bluetoothDeviceId: bleDevice && bleDevice.id,
+    });
     const tail = textDecoder.decode();
     if (tail) {
       appendTerminal(tail);
@@ -1814,19 +2494,40 @@ async function connectBleShell() {
     appendTerminal("\n[disconnected]\n");
   });
 
+  bleDebug("Connecting GATT", {
+    name: bleDevice.name,
+    bluetoothDeviceId: bleDevice.id,
+  });
   bleServer = await bleDevice.gatt.connect();
+  bleDebug("GATT connected", {
+    name: bleDevice.name,
+    bluetoothDeviceId: bleDevice.id,
+  });
   const errors = [];
 
   for (const profile of BLE_PROFILES) {
     try {
+      bleDebug("Discovering BLE profile", {
+        profile: profile.label,
+        serviceUuid: profile.serviceUuid,
+      });
       const service = await bleServer.getPrimaryService(profile.serviceUuid);
       bleRxCharacteristic = await service.getCharacteristic(profile.writeUuid);
       bleTxCharacteristic = await service.getCharacteristic(profile.notifyUuid);
       bleConnectedProfile = profile;
+      bleDebug("Discovered BLE profile", {
+        profile: profile.label,
+        serviceUuid: profile.serviceUuid,
+        writeUuid: profile.writeUuid,
+        notifyUuid: profile.notifyUuid,
+      });
       break;
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
       errors.push(`${profile.label}: ${message}`);
+      bleDebugError(`BLE profile discovery failed: ${profile.label}`, error, {
+        serviceUuid: profile.serviceUuid,
+      });
     }
   }
 
@@ -1835,22 +2536,48 @@ async function connectBleShell() {
   }
 
   await bleTxCharacteristic.startNotifications();
+  bleDebug("Notifications started", {
+    profile: bleConnectedProfile.label,
+    notifyUuid: bleConnectedProfile.notifyUuid,
+  });
   bleTxCharacteristic.addEventListener("characteristicvaluechanged", (event) => {
     const chunk = textDecoder.decode(event.target.value, { stream: true });
     appendTerminal(chunk);
   });
 
-  setBleShellControlsDisabled(!bleConnectedProfile.textShell);
   setConnState(true);
-  setBleStatus(`Connected to ${bleDevice.name || "BLE device"} over ${bleConnectedProfile.label}`);
   appendTerminal(`[connected ${bleDevice.name || "device"} over ${bleConnectedProfile.label}]\n`);
   if (bleConnectedProfile.textShell) {
-    setBleWorkflowStatus("Connected — trigger a flow or read sensors.");
-    // Populate the link-status pills right away.
+    setBleShellControlsDisabled(true);
+    setBleStatus("Connected over BLE · verifying Sidewalk identity…");
+    setBleWorkflowStatus("Verifying the board against its AWS Sidewalk record…");
+    const identityPromise = waitForBleIdentity();
+    bleDebug("Sending identity verification command", { command: "sid identity" });
+    await sendBleCommand("sid identity");
+    const identifiedDevice = await identityPromise;
+    bleDebug("Identity verification succeeded", {
+      awsDevice: identifiedDevice.name,
+      wirelessDeviceId: identifiedDevice.wirelessDeviceId,
+      identityFingerprint: identifiedDevice.identityFingerprint,
+    });
+
+    setBleShellControlsDisabled(false);
+    setBleStatus(
+      `Connected: ${identifiedDevice.name} · ${identifiedDevice.wirelessDeviceId}`,
+    );
+    setBleWorkflowStatus(
+      `Verified ${bleDevice.name || "WebShell"} as ${identifiedDevice.name}.`,
+    );
+    setLocationStatus("Ready to request an AWS Sidewalk location.");
+    appendTerminal(
+      `[verified AWS device ${identifiedDevice.name} · ${identifiedDevice.wirelessDeviceId}]\n`,
+    );
     runBleShellCommand("sid flow status").catch(() => {});
   } else {
+    setBleShellControlsDisabled(true);
     setBleWorkflowStatus("Connected over Sidewalk BLE — this transport doesn't expose the command shell.");
     appendTerminal("[info] Sidewalk BLE transport connected; the sid command shell is over Nordic UART.\n");
+    throw new Error("The selected device does not expose the identity command shell");
   }
 }
 
@@ -1897,11 +2624,32 @@ if (downlinkForm) {
   });
 }
 
+if (bleScanButton) {
+  bleScanButton.addEventListener("click", async () => {
+    try {
+      await scanNearbyDevices();
+    } catch (error) {
+      bleDebugError("Scan Nearby flow failed", error);
+      stopBleNearbyScan();
+      if (bleNearby) {
+        bleNearby.hidden = false;
+      }
+      if (bleScanStatus) {
+        bleScanStatus.textContent = `Scan error: ${error.message || error}`;
+      }
+    }
+  });
+}
+
 if (bleConnectButton) {
   bleConnectButton.addEventListener("click", async () => {
     try {
       await connectBleShell();
     } catch (error) {
+      bleDebugError("Connect flow failed", error);
+      if (bleDevice && bleDevice.gatt && bleDevice.gatt.connected) {
+        bleDevice.gatt.disconnect();
+      }
       setBleStatus(`BLE error: ${error.message}`);
     }
   });
@@ -1946,6 +2694,20 @@ if (bleWorkflowButtons.length) {
         const message = error && error.message ? error.message : String(error);
         setBleStatus(`BLE error: ${message}`);
         setBleWorkflowStatus(`Workflow error: ${message}`);
+        appendTerminal(`[error] ${message}\n`);
+      }
+    });
+  }
+}
+
+if (locationButtons.length) {
+  for (const button of locationButtons) {
+    button.addEventListener("click", async () => {
+      try {
+        await runLocationAction(button.dataset.locationAction);
+      } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        setLocationStatus(message, "error");
         appendTerminal(`[error] ${message}\n`);
       }
     });
@@ -2047,9 +2809,19 @@ if (sensorRangeSelect) {
 
 if (deviceSelector) {
   deviceSelector.addEventListener("change", async () => {
+    if (
+      bleIdentifiedDevice
+      && bleDevice
+      && bleDevice.gatt
+      && bleDevice.gatt.connected
+      && String(bleIdentifiedDevice.id) !== deviceSelector.value
+    ) {
+      bleDevice.gatt.disconnect();
+    }
     updateSelectedDeviceUi();
+    renderNearbyDevices();
     await applySensorRange();
-    connectEventStream();
+    connectEventStream({ resetCursor: true });
     if (flashProvisionInput && flashProvisionInput.checked && flashPresetSelect && flashPresetSelect.value) {
       try {
         await loadFlashPreset(flashPresetSelect.value);
@@ -2225,6 +2997,7 @@ if (new URLSearchParams(window.location.search).get("demo") === "1") {
   setBleStatus("Connected to Sidewalk Devkit (demo)");
   setBleShellControlsDisabled(false);
   setBleWorkflowStatus("Demo mode — controls are illustrative.");
+  setLocationStatus("Demo mode — Sidewalk Location controls are ready.");
 }
 
 initSensorDashboard();

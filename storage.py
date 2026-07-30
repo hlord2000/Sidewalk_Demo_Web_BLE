@@ -31,8 +31,11 @@ class DemoStore:
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 10000")
+        conn.execute("PRAGMA synchronous = NORMAL")
         try:
             yield conn
             conn.commit()
@@ -41,10 +44,9 @@ class DemoStore:
 
     def init_db(self) -> None:
         with self.connect() as conn:
+            conn.execute("PRAGMA journal_mode = WAL")
             conn.executescript(
                 """
-                PRAGMA foreign_keys = ON;
-
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     email TEXT NOT NULL UNIQUE,
@@ -467,6 +469,18 @@ class DemoStore:
                     utc_now_iso(),
                     device_id,
                 ),
+            )
+
+    def update_device_name(self, device_id: int, name: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE devices
+                SET name = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (name, utc_now_iso(), device_id),
             )
 
     def update_device_customers(self, device_id: int, customer_user_ids: list[int]) -> None:
