@@ -7,7 +7,7 @@
 <script defer src="{{ url_for('static', filename='vendor/dap.umd.js', v='20260423webusb') }}"></script>
 <script defer src="{{ url_for('static', filename='ui.js', v='20260618loop') }}"></script>
 <script defer src="{{ url_for('static', filename='sensors.js', v='20260618tsfix') }}"></script>
-<script defer src="{{ url_for('static', filename='app.js', v='20260819logfilter') }}"></script>
+<script defer src="{{ url_for('static', filename='app.js', v='20260819sharp') }}"></script>
 {% endblock %}
 {% block body %}
 <main class="page-shell app-shell">
@@ -35,40 +35,6 @@
     </div>
   </header>
 
-  <section class="devicebar">
-    <label class="devicebar-device">
-      <span>Active Device</span>
-      <select id="device-selector" {% if not page_config.devices %}disabled{% endif %}>
-        {% for device in page_config.devices %}
-        <option value="{{ device.id }}" {% if device.id == page_config.selectedDeviceId %}selected{% endif %}>
-          {{ device.name }}{% if device.customerName and page_config.user.role == 'admin' %} · {{ device.customerName }}{% endif %}
-        </option>
-        {% else %}
-        <option value="">No devices assigned</option>
-        {% endfor %}
-      </select>
-    </label>
-    <div class="devicebar-meta monitor-meta">
-      <span id="event-feed-status" class="live-badge live-badge--connecting">Connecting</span>
-      <span id="selected-device-chip">
-        {% if page_config.selectedWirelessDeviceId %}
-        <span class="meta-key">Device ID</span> <code>{{ page_config.selectedWirelessDeviceId }}</code>
-        {% else %}
-        No assigned device
-        {% endif %}
-      </span>
-      <span id="selected-topic-chip">
-        {% if page_config.selectedUplinkTopic %}
-        <span class="meta-key">Topic</span> <code>{{ page_config.selectedUplinkTopic }}</code>
-        {% else %}
-        No uplink topic configured
-        {% endif %}
-      </span>
-      <span id="connected-device-chip">
-        <span class="meta-key">BLE</span> not connected
-      </span>
-    </div>
-  </section>
 
   <nav class="tabnav" role="tablist" data-tabset="dashboard" aria-label="Console sections">
     <button class="tab" role="tab" type="button" data-tab-target="monitor" aria-selected="true">
@@ -118,20 +84,44 @@
     </div>
 
     <div id="sensor-charts" class="chart-grid" hidden></div>
-    </section>
 
-    <article class="panel panel-wide loop-log">
+    <article class="panel panel-console loop-console">
+      <div class="panel-head">
+        <span class="panel-head-inline">
+          <p class="eyebrow">BLE shell</p>
+          <h2>Nordic UART Console</h2>
+        </span>
+        <span class="muted">Raw board output over Nordic UART.</span>
+      </div>
+      <div id="ble-terminal" class="terminal terminal-screen" aria-label="BLE shell output" role="log"></div>
+      <form id="ble-command-form" class="command-row">
+        <input
+          id="ble-command"
+          type="text"
+          placeholder="sid last_status"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="none"
+          inputmode="text"
+          enterkeyhint="send"
+          spellcheck="false">
+        <button type="submit">Send Command</button>
+      </form>
+    </article>
+    <article class="panel loop-log">
       <details class="log-disclosure" open>
         <summary>
           <span class="panel-head-inline">
             <span class="eyebrow">Server stream</span>
             <h2>Raw Uplink Log</h2>
           </span>
-          <span class="muted">MQTT uplinks for the selected device.</span>
+          <span id="event-feed-status" class="live-badge live-badge--connecting">Connecting</span>
         </summary>
         <div id="event-log" class="event-log"></div>
       </details>
     </article>
+    </section>
+
 
     <article class="panel loop-control">
       <div class="panel-head">
@@ -140,6 +130,40 @@
       </div>
 
       <div class="stack device-control">
+        <div class="control-device-select">
+      <label class="control-device">
+        <span class="control-label">Active device</span>
+        <select id="device-selector" {% if not page_config.devices %}disabled{% endif %}>
+          {% for device in page_config.devices %}
+          <option value="{{ device.id }}" {% if device.id == page_config.selectedDeviceId %}selected{% endif %}>
+            {{ device.name }}{% if device.customerName and page_config.user.role == 'admin' %} · {{ device.customerName }}{% endif %}
+          </option>
+          {% else %}
+          <option value="">No devices assigned</option>
+          {% endfor %}
+        </select>
+      </label>
+        </div>
+        <div class="control-identity monitor-meta">
+          <span id="selected-device-chip">
+            {% if page_config.selectedWirelessDeviceId %}
+            <span class="meta-key">Device ID</span> <code>{{ page_config.selectedWirelessDeviceId }}</code>
+            {% else %}
+            No assigned device
+            {% endif %}
+          </span>
+          <span id="selected-topic-chip">
+            {% if page_config.selectedUplinkTopic %}
+            <span class="meta-key">Topic</span> <code>{{ page_config.selectedUplinkTopic }}</code>
+            {% else %}
+            No uplink topic configured
+            {% endif %}
+          </span>
+          <span id="connected-device-chip">
+            <span class="meta-key">BLE</span> <code>not connected</code>
+          </span>
+        </div>
+
         <div class="control-connect">
           <div class="inline-actions console-actions">
             <button id="ble-scan" type="button" class="ghost-button">Scan Nearby</button>
@@ -281,24 +305,6 @@
               <button type="button" class="js-shell-command ghost-button" data-command="sid deinit" title="sid deinit">Deinit</button>
             </div>
 
-            <form id="ble-command-form" class="command-row">
-              <input
-                id="ble-command"
-                type="text"
-                placeholder="sid last_status"
-                autocomplete="off"
-                autocorrect="off"
-                autocapitalize="none"
-                inputmode="text"
-                enterkeyhint="send"
-                spellcheck="false">
-              <button type="submit">Send Command</button>
-            </form>
-
-            <details class="raw-disclosure">
-              <summary>Raw responses</summary>
-              <div id="ble-terminal" class="terminal terminal-screen" aria-label="BLE shell output" role="log"></div>
-            </details>
           </div>
         </details>
       </div>

@@ -35,7 +35,7 @@
     accent: "#00a9ce",
     blue: "#0077c8",
     green: "#2a8a57",
-    violet: "#7a5af0",
+    violet: "#2b343b",
     amber: "#b8860b",
     warn: "#b54732",
   };
@@ -246,18 +246,15 @@
 
         ctx.strokeStyle = s.color;
         ctx.lineWidth = 2;
-        ctx.lineJoin = "round";
-        ctx.lineCap = "round";
+        ctx.lineJoin = "miter";
+        ctx.lineCap = "butt";
         ctx.beginPath();
         pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
         ctx.stroke();
 
         // Soft fill under single-series charts.
         if (this.series.length === 1) {
-          const grad = ctx.createLinearGradient(0, padT, 0, padT + plotH);
-          grad.addColorStop(0, hexA(s.color, 0.16));
-          grad.addColorStop(1, hexA(s.color, 0));
-          ctx.fillStyle = grad;
+          ctx.fillStyle = hexA(s.color, 0.14);
           ctx.beginPath();
           pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
           ctx.lineTo(pts[pts.length - 1].x, padT + plotH);
@@ -268,27 +265,27 @@
 
         ctx.fillStyle = s.color;
         for (const p of pts) {
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
         }
-        // Emphasise the most recent reading.
+        // Emphasise the most recent reading with an ink-edged square.
         const last = pts[pts.length - 1];
-        ctx.beginPath();
-        ctx.arc(last.x, last.y, 3.5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = "#fff";
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
+        ctx.fillRect(last.x - 3.5, last.y - 3.5, 7, 7);
+        ctx.strokeStyle = COLORS.ink;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(last.x - 3.5, last.y - 3.5, 7, 7);
       }
 
       this._drawFrame(ctx, padL, padT, plotW, plotH);
     }
 
     _drawFrame(ctx, x, y, w, h) {
-      ctx.strokeStyle = COLORS.line;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+      // Sharp Nordic: one thick ink baseline, no box around the plot.
+      ctx.strokeStyle = COLORS.ink;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x, y + h);
+      ctx.lineTo(x + w, y + h);
+      ctx.stroke();
     }
 
     _fmt(v) {

@@ -68,11 +68,19 @@
   --warn: #b54732;
   --lime: #d0df00;
 
-  --shadow-sm: 0 1px 2px rgba(40, 51, 59, 0.05);
-  --shadow: 0 10px 30px rgba(40, 51, 59, 0.07);
+  /* Sharp Nordic: depth comes from flat edges and offset blocks, never from a
+     blurred drop shadow, so the shadow tokens resolve to nothing. */
+  --shadow-sm: none;
+  --shadow: none;
 
-  --radius: 5px;
-  --radius-lg: 8px;
+  --radius: 0;
+  --radius-lg: 0;
+
+  /* The structural frame: 2px ink on every surface, 1px rules inside it. */
+  --edge: 2px solid var(--ink);
+  --edge-soft: 2px solid var(--line-strong);
+  --rule: 1px solid var(--line);
+  --offset-tint: rgba(0, 169, 206, 0.16);
   --page-width: 1280px;
 
   --mono: "Pragmata Medium", "SFMono-Regular", "Liberation Mono", monospace;
@@ -108,7 +116,7 @@ body::before {
   content: "";
   position: fixed;
   inset: 0 0 auto 0;
-  height: 3px;
+  height: 6px;
   background: var(--accent);
   z-index: 20;
 }
@@ -899,7 +907,7 @@ select:focus {
   min-height: 2.4rem;
   padding: 0.4rem 0.8rem;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 0;
   background: #fff;
   color: var(--ink);
   font-family: var(--sans-regular);
@@ -912,7 +920,7 @@ select:focus {
   content: "";
   width: 0.56rem;
   height: 0.56rem;
-  border-radius: 999px;
+  border-radius: 0;
   background: currentColor;
 }
 
@@ -1407,7 +1415,7 @@ select:focus {
   width: auto;
   min-height: 2.2rem;
   padding: 0.3rem 0.85rem;
-  border-radius: 999px;
+  border-radius: 0;
   border-color: var(--line);
   background: var(--panel);
   color: var(--ink-soft);
@@ -1426,7 +1434,7 @@ select:focus {
   min-height: 2.2rem;
   padding: 0.3rem 0.85rem;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 0;
   background: var(--panel);
   color: var(--ink-soft);
   font-family: var(--sans-regular);
@@ -1620,7 +1628,7 @@ select:focus {
 .chart-legend-dot {
   width: 0.6rem;
   height: 0.6rem;
-  border-radius: 2px;
+  border-radius: 0;
 }
 
 .chart-canvas-wrap {
@@ -1881,7 +1889,7 @@ button.ble-nearby-device:focus-visible {
   content: "";
   width: 0.6rem;
   height: 0.6rem;
-  border-radius: 999px;
+  border-radius: 0;
   background: var(--ink-muted);
 }
 
@@ -1936,7 +1944,7 @@ button.ble-nearby-device:focus-visible {
   min-height: 2rem;
   padding: 0.3rem 0.8rem;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 0;
   background: var(--panel);
   color: var(--ink);
   font-family: var(--sans-regular);
@@ -1946,7 +1954,7 @@ button.ble-nearby-device:focus-visible {
 .link-dot {
   width: 0.55rem;
   height: 0.55rem;
-  border-radius: 999px;
+  border-radius: 0;
   background: var(--ink-muted);
   transition: background-color 140ms ease;
 }
@@ -2113,7 +2121,7 @@ button.ble-nearby-device:focus-visible {
   min-width: 1.8rem;
   height: 1.5rem;
   padding: 0 0.5rem;
-  border-radius: 999px;
+  border-radius: 0;
   background: var(--accent-soft);
   color: var(--accent-deep);
   font-family: var(--sans-regular);
@@ -2191,7 +2199,7 @@ button.ble-nearby-device:focus-visible {
   flex: 0 0 auto;
   padding: 0.25rem 0.6rem;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 0;
   background: var(--bg-soft);
   color: var(--ink-soft);
   font-family: var(--sans-regular);
@@ -2247,7 +2255,7 @@ button.ble-nearby-device:focus-visible {
   display: inline-flex;
   align-items: center;
   padding: 0.2rem 0.6rem;
-  border-radius: 999px;
+  border-radius: 0;
   background: var(--accent-soft);
   color: var(--accent-deep);
   font-family: var(--sans-regular);
@@ -2516,4 +2524,688 @@ button.ble-nearby-device:focus-visible {
 
 .msg-table .muted {
   font-size: 0.76rem;
+}
+
+/* ==========================================================================
+   SHARP NORDIC
+   Brutalist structure on the existing palette: every corner square, a 2px ink
+   frame on every surface, uppercase micro-labels, rectangular chips, square
+   status dots. No drop shadows — depth is a flat offset block or a thick
+   coloured edge. Cyan carries actions, lime marks live state and the shell
+   cursor, ink does the structural work.
+   ========================================================================== */
+
+/* --- Surfaces ------------------------------------------------------------- */
+.panel,
+.topbar,
+.appbar,
+.devicebar,
+.login-card,
+.entity-card,
+.table-wrap,
+.chart-card,
+.stat-tile,
+.event-log,
+.terminal,
+.ble-nearby {
+  border: var(--edge);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* --- Type: headings shout, labels whisper in caps ------------------------- */
+.panel-head h2,
+.section-intro h2,
+.section-heading h2,
+.admin-toolbar h2,
+.login-card h2,
+.brand-title {
+  font-family: var(--sans-bold);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.015em;
+}
+
+.eyebrow,
+.meta-key,
+.control-label,
+.highlight-label,
+.link-status-label,
+.stat-label,
+.chart-title {
+  font-family: var(--sans-bold);
+  font-weight: 700;
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* --- Panel headers: a full-bleed ink bar with a lime eyebrow -------------- */
+.panel-head {
+  margin: -1.6rem -1.6rem 1.3rem;
+  padding: 0.95rem 1.1rem;
+  border-bottom: var(--edge);
+  background: var(--dark);
+}
+
+.panel-head h2,
+.panel-head .panel-head-inline h2 {
+  color: #fff;
+  font-size: 1.15rem;
+}
+
+.panel-head .eyebrow,
+.panel-head .muted {
+  color: var(--lime);
+}
+
+/* --- Buttons: square, uppercase, always edged ----------------------------- */
+button,
+.link-button {
+  border: var(--edge);
+  border-radius: 0;
+  background: var(--accent-strong);
+  color: #fff;
+  font-family: var(--sans-bold);
+  font-weight: 700;
+  font-size: 0.82rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  min-height: 3rem;
+  box-shadow: none;
+}
+
+button:hover,
+button:focus {
+  background: var(--accent);
+  border-color: var(--ink);
+  box-shadow: 0.3rem 0.3rem 0 var(--offset-tint);
+}
+
+.ghost-button,
+.ghost-button--link {
+  border: var(--edge);
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.ghost-button:hover,
+.ghost-button:focus,
+.ghost-button--link:hover {
+  background: var(--bg-soft);
+  color: var(--accent-deep);
+  border-color: var(--ink);
+  box-shadow: 0.3rem 0.3rem 0 var(--offset-tint);
+}
+
+button:disabled,
+.ghost-button:disabled {
+  border-color: var(--line-strong);
+  background: var(--bg-soft);
+  color: var(--ink-soft);
+  box-shadow: none;
+}
+
+/* --- Tabs: butted boxes, active one filled -------------------------------- */
+.tabnav {
+  gap: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-left: var(--edge);
+}
+
+.tab {
+  min-height: 3.25rem;
+  border: var(--edge);
+  border-left: 0;
+  border-radius: 0;
+  background: var(--panel);
+  color: var(--ink-soft);
+  font-family: var(--sans-bold);
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.tab--active,
+.tab[aria-selected="true"] {
+  background: var(--accent-strong);
+  color: #fff;
+  box-shadow: none;
+}
+
+.tab:hover:not(.tab--active) {
+  background: var(--bg-soft);
+  color: var(--ink);
+}
+
+/* --- Chips: an ink label block welded to a mono value --------------------- */
+.pill,
+.live-badge,
+.count-badge,
+.toolbar-count,
+.link-pill,
+.selected-device-chip,
+.connected-device-chip,
+.devicebar-meta > span,
+.monitor-meta > span {
+  border: var(--edge);
+  border-radius: 0;
+}
+
+.devicebar-meta > span,
+.monitor-meta > span {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.devicebar-meta .meta-key,
+.monitor-meta .meta-key {
+  padding: 0.35rem 0.55rem;
+  background: var(--ink);
+  color: #fff;
+  font-size: 0.62rem;
+}
+
+.devicebar-meta code,
+.monitor-meta code {
+  padding: 0.35rem 0.6rem;
+  background: var(--panel);
+  font-size: 0.76rem;
+}
+
+.live-badge {
+  background: var(--lime);
+  color: var(--ink);
+  font-family: var(--sans-bold);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+.live-badge--live {
+  background: var(--lime);
+  color: var(--ink);
+}
+
+.live-badge--connecting {
+  background: var(--bg-soft);
+  color: var(--ink-soft);
+}
+
+.live-badge--error {
+  background: var(--warn);
+  color: #fff;
+}
+
+/* --- Status dots are squares; a round dot reads as the old system --------- */
+.live-badge::before,
+.link-dot,
+.conn-state::before,
+.stat-flag::before {
+  border-radius: 0;
+}
+
+/* --- Connection state: a thick coloured edge, not a tinted card ----------- */
+.conn-state {
+  border: 0;
+  border-left: 6px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--bg-soft);
+  padding: 0.65rem 0.8rem;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+}
+
+.conn-state--on {
+  border-left-color: var(--success);
+}
+
+.conn-state--off {
+  border-left-color: var(--ink-muted);
+}
+
+/* --- Inputs: square, edged, cyan focus ------------------------------------ */
+input,
+textarea,
+select,
+.range-select {
+  border: var(--edge);
+  border-radius: 0;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--accent);
+  outline: 0;
+  box-shadow: inset 0 0 0 2px var(--offset-tint);
+}
+
+/* --- Data surfaces -------------------------------------------------------- */
+.stat-tile {
+  border-radius: 0;
+}
+
+.stat-value {
+  font-family: var(--mono);
+}
+
+.data-table thead th {
+  font-family: var(--sans-bold);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.data-table th,
+.data-table td {
+  border-bottom: var(--rule);
+}
+
+.event-card {
+  border: 0;
+  border-bottom: var(--rule);
+  border-radius: 0;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+
+.event-log {
+  padding: 0;
+  background: var(--panel);
+}
+
+.terminal {
+  border: var(--edge);
+  border-radius: 0;
+}
+
+.terminal-cursor {
+  border-radius: 0;
+}
+
+/* --- Empty states, flashes, dialogs -------------------------------------- */
+.empty-state {
+  border: var(--edge-soft);
+  border-radius: 0;
+  background: var(--bg-soft);
+}
+
+.flash-box,
+.error-box,
+.status-box {
+  border: var(--edge);
+  border-left: 6px solid var(--accent);
+  border-radius: 0;
+}
+
+.flash-box--error,
+.error-box {
+  border-left-color: var(--warn);
+}
+
+.flash-box--success {
+  border-left-color: var(--success);
+}
+
+dialog,
+.modal-card {
+  border: var(--edge);
+  border-radius: 0;
+  box-shadow: 0.5rem 0.5rem 0 var(--offset-tint);
+}
+
+/* --- Login: same vocabulary, one bold block ------------------------------- */
+.login-card {
+  background: var(--panel);
+}
+
+.highlight-card {
+  border: 2px solid rgba(255, 255, 255, 0.38);
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+}
+
+.highlight-card strong {
+  font-family: var(--sans-bold);
+  font-weight: 700;
+}
+
+.login-brand .highlight-label {
+  color: var(--lime);
+}
+
+/* The sign-in headline stays sentence case — a long line in caps is a wall. */
+.login-brand h1 {
+  font-family: var(--sans-bold);
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: -0.005em;
+}
+
+/* --- Nearby-device rows -------------------------------------------------- */
+.ble-nearby-device {
+  border: var(--edge);
+  border-radius: 0;
+}
+
+/* --- Layout of the reworked Monitor & Control tab -------------------------- */
+/* Device Control keeps the selector and identity chips; the console and the
+   raw log sit in the telemetry column, so the send → response loop reads top
+   to bottom on the right. */
+.control-device-select {
+  display: block;
+}
+
+.control-device select {
+  min-height: 3rem;
+  font-family: var(--sans-regular);
+}
+
+.control-identity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+
+.control-identity > span {
+  display: inline-flex;
+  align-items: stretch;
+  border: var(--edge);
+  overflow: hidden;
+}
+
+.loop-console {
+  padding: 0;
+}
+
+.loop-console .panel-head {
+  margin: 0;
+}
+
+.loop-console .terminal {
+  border: 0;
+  border-bottom: var(--edge);
+  min-height: 16rem;
+}
+
+.loop-console .command-row {
+  gap: 0;
+  padding: 0;
+}
+
+.loop-console .command-row input {
+  border: 0;
+  padding: 0.85rem 1rem;
+  font-family: var(--mono);
+}
+
+.loop-console .command-row input:focus {
+  box-shadow: inset 0 0 0 2px var(--offset-tint);
+}
+
+.loop-console .command-row button {
+  border: 0;
+  border-left: var(--edge);
+  min-width: 11rem;
+}
+
+/* The log's disclosure summary becomes the same ink bar as a panel head. */
+.loop-log {
+  padding: 0;
+}
+
+.log-disclosure > summary {
+  margin: 0;
+  padding: 0.95rem 1.1rem;
+  border-bottom: var(--edge);
+  background: var(--dark);
+  list-style: none;
+  cursor: pointer;
+}
+
+.log-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.log-disclosure > summary h2 {
+  color: #fff;
+  font-family: var(--sans-bold);
+  font-weight: 700;
+  font-size: 1.15rem;
+  text-transform: uppercase;
+  letter-spacing: 0.015em;
+}
+
+.log-disclosure > summary .eyebrow {
+  color: var(--lime);
+}
+
+.log-disclosure .event-log {
+  border: 0;
+  max-height: 26rem;
+}
+
+/* Charts: square cards with an ink frame and a mono readout. */
+.chart-card {
+  border: var(--edge);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.chart-card-head h3 {
+  font-family: var(--sans-bold);
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.chart-latest {
+  font-family: var(--mono);
+}
+
+.console-secondary {
+  border: var(--edge-soft);
+  border-radius: 0;
+}
+
+.console-secondary > summary,
+.raw-disclosure > summary {
+  font-family: var(--sans-bold);
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* --- Admin: the same vocabulary on the inventory pages -------------------- */
+.admin-toolbar .eyebrow {
+  color: var(--accent);
+}
+
+.entity-card {
+  box-shadow: none;
+}
+
+.entity-title {
+  font-family: var(--sans-bold);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.015em;
+  font-size: 1.05rem;
+}
+
+.entity-sub,
+.msg-table code {
+  font-family: var(--mono);
+}
+
+.count-badge,
+.toolbar-count {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+/* --- Login: one bold block, same edges ----------------------------------- */
+.login-card h2 {
+  font-size: 1.6rem;
+}
+
+.highlight-card {
+  box-shadow: none;
+}
+
+.highlight-label {
+  color: var(--accent);
+}
+
+/* --- Chip internals: an ink label block, then the value ------------------- */
+/* The value is sometimes a <code>, sometimes bare text (app.js writes both),
+   so the parent carries the trailing padding and the label carries the gap. */
+.control-identity > span,
+.devicebar-meta > span,
+.monitor-meta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 0.65rem 0 0;
+  line-height: 1.5;
+  font-size: 0.78rem;
+}
+
+.control-identity .meta-key,
+.devicebar-meta .meta-key,
+.monitor-meta .meta-key {
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  margin-right: 0.65rem;
+  padding: 0.4rem 0.55rem;
+  background: var(--ink);
+  color: #fff;
+  font-size: 0.62rem;
+}
+
+.control-identity code,
+.devicebar-meta code,
+.monitor-meta code {
+  padding: 0.35rem 0;
+  background: transparent;
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
+.control-identity > span:not(:has(.meta-key)),
+.monitor-meta > span:not(:has(.meta-key)) {
+  padding: 0.4rem 0.65rem;
+}
+
+/* --- Long-labelled actions wrap instead of bursting their column ---------- */
+.inline-actions--location {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.inline-actions--location button,
+.control-connect button,
+.link-status button {
+  white-space: normal;
+  letter-spacing: 0.06em;
+}
+
+.ghost-button,
+.ghost-button--link {
+  padding: 0 1.1rem;
+  min-height: 2.8rem;
+  white-space: nowrap;
+}
+
+/* On a dark head, lime is reserved for the eyebrow; supporting copy is soft. */
+.panel-head .muted,
+.log-disclosure > summary .muted {
+  color: #9fb0ba;
+}
+
+/* --- Page footer picks up the micro-label voice --------------------------- */
+.app-footer,
+.page-footer {
+  font-family: var(--sans-bold);
+  font-weight: 700;
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+/* --- Narrow widths: this demo is driven from a phone over Web Bluetooth ---- */
+@media (max-width: 700px) {
+  /* Three tracked uppercase tabs cannot share one row at phone width; stack
+     them into butted full-width boxes instead of clipping the labels. */
+  .tabnav {
+    flex-direction: column;
+    border-left: 0;
+  }
+
+  .tab {
+    flex: 1 1 auto;
+    border: var(--edge);
+    border-top: 0;
+    min-height: 3rem;
+    font-size: 0.74rem;
+    letter-spacing: 0.08em;
+  }
+
+  .tab:first-child {
+    border-top: var(--edge);
+  }
+
+  /* One action per row: two 11rem columns overflow a 402px viewport. */
+  .console-actions,
+  .inline-actions--triple {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* A chip whose value has to wrap stacks instead: ink label bar on top, mono
+     value beneath. Side by side, the stretched label block swallows the row. */
+  .control-identity > span,
+  .monitor-meta > span,
+  .devicebar-meta > span {
+    flex: 0 1 auto;
+    max-width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 0;
+  }
+
+  .control-identity .meta-key,
+  .monitor-meta .meta-key,
+  .devicebar-meta .meta-key {
+    flex: 0 0 auto;
+    align-self: stretch;
+    margin: 0;
+    justify-content: flex-start;
+  }
+
+  .control-identity code,
+  .monitor-meta code,
+  .devicebar-meta code {
+    padding: 0.45rem 0.6rem;
+  }
+
+  .loop-console .command-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .loop-console .command-row input {
+    border-bottom: var(--edge);
+  }
+
+  .loop-console .command-row button {
+    border-left: 0;
+    min-width: 0;
+  }
 }

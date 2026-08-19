@@ -1522,7 +1522,9 @@ function updateConnectedDeviceUi(device = null) {
   connectedDeviceChip.append(label, document.createTextNode(" "));
 
   if (!device) {
-    connectedDeviceChip.append(document.createTextNode("not connected"));
+    const idle = document.createElement("code");
+    idle.textContent = "not connected";
+    connectedDeviceChip.append(idle);
     return;
   }
 
