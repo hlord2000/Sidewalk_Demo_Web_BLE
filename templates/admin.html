@@ -2,7 +2,7 @@
 {% block title %}Admin | Sidewalk Demo{% endblock %}
 {% block head %}
 <script defer src="{{ url_for('static', filename='ui.js', v='20260617admin2') }}"></script>
-<script defer src="{{ url_for('static', filename='admin.js', v='20260819messages') }}"></script>
+<script defer src="{{ url_for('static', filename='admin.js', v='20260819live') }}"></script>
 {% endblock %}
 {% block body %}
 <main class="page-shell app-shell">
@@ -231,7 +231,7 @@
         </select>
       </label>
       <button type="button" class="ghost-button" id="admin-message-refresh">Refresh</button>
-      <span class="muted action-status" id="admin-message-status">Loading messages…</span>
+      <span class="live-badge live-badge--connecting" id="admin-message-status">Connecting</span>
     </div>
 
     <div class="table-wrap">

@@ -4,6 +4,7 @@ The app module builds its store and seeds the admin at import time, so the
 environment is pointed at a throwaway database before importing it.
 """
 
+import json
 import os
 import tempfile
 import unittest
@@ -72,6 +73,14 @@ class AdminMessageApiTests(unittest.TestCase):
 
     def _customer_client(self):
         return self._client(self.customer["email"], "customer-password")
+
+    @staticmethod
+    def _next_chunk(events) -> str:
+        chunk = next(events)
+        return chunk.decode() if isinstance(chunk, bytes) else chunk
+
+    def _next_streamed_row(self, events) -> dict:
+        return json.loads(self._next_chunk(events).split("data: ", 1)[1])
 
     def test_ble_lines_reach_the_admin_feed_with_their_device_id(self) -> None:
         customer = self._customer_client()
@@ -174,6 +183,76 @@ class AdminMessageApiTests(unittest.TestCase):
         )
 
         self.assertEqual(self.store.list_messages(), [])
+
+    def test_ble_lines_arrive_on_the_live_stream(self) -> None:
+        admin = self._admin_client()
+        response = admin.get("/api/admin/stream")
+        events = response.response
+        # Reading the first chunk registers the listener before anything is published.
+        self.assertIn("retry:", self._next_chunk(events))
+
+        customer = self._customer_client()
+        customer.post(
+            "/api/ble-log",
+            json={
+                "deviceId": self.device["id"],
+                "bleName": "WebShell-1A2B",
+                "lines": ["uart:~$ sid flow status"],
+            },
+        )
+
+        payload = self._next_streamed_row(events)
+        response.close()
+
+        self.assertEqual(payload["source"], "ble")
+        self.assertEqual(payload["event_type"], "ble_shell")
+        self.assertEqual(payload["detail"], "uart:~$ sid flow status")
+        self.assertEqual(payload["wireless_device_id"], self.device["wireless_device_id"])
+        self.assertEqual(payload["device_name"], "AODemo1")
+        self.assertTrue(payload["id"], "streamed rows carry the log id used as a cursor")
+
+    def test_uplinks_arrive_on_the_live_stream_with_their_log_id(self) -> None:
+        admin = self._admin_client()
+        response = admin.get("/api/admin/stream")
+        events = response.response
+        self._next_chunk(events)
+
+        app_module.broker.publish(
+            {
+                "type": "uplink",
+                "wireless_device_id": self.device["wireless_device_id"],
+                "link_name": "BLE",
+                "payload_text": "button",
+            }
+        )
+
+        payload = self._next_streamed_row(events)
+        response.close()
+
+        self.assertEqual(payload["event_type"], "uplink")
+        self.assertEqual(payload["source"], "sidewalk")
+        self.assertEqual(payload["payload_text"], "button")
+        stored = self.store.list_messages()[0]
+        self.assertEqual(payload["id"], stored["id"])
+
+    def test_ble_lines_stay_off_the_customer_event_stream(self) -> None:
+        customer = self._customer_client()
+        customer.post(
+            "/api/ble-log",
+            json={"deviceId": self.device["id"], "lines": ["private shell output"]},
+        )
+
+        # Nothing BLE-shaped may sit in the dashboard broker's backlog.
+        listener, history = app_module.broker.open_stream(0)
+        app_module.broker.close_stream(listener)
+
+        self.assertEqual([event for event in history if event.get("type") == "ble_shell"], [])
+
+    def test_customers_cannot_read_the_live_stream(self) -> None:
+        customer = self._customer_client()
+        response = customer.get("/api/admin/stream")
+
+        self.assertIn(response.status_code, (302, 303))
 
     def test_customers_cannot_read_the_admin_feed(self) -> None:
         customer = self._customer_client()

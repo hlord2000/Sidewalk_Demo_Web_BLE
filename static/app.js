@@ -1807,7 +1807,9 @@ function updateSelectedDeviceUi() {
 
 // Raw BLE shell output is only visible to the browser holding the link, so it is
 // batched up to the server for the admin message log.
-const BLE_LOG_FLUSH_MS = 1500;
+// Short enough that an admin watching the live feed sees lines land as they
+// arrive, long enough to batch a burst of shell output into one request.
+const BLE_LOG_FLUSH_MS = 300;
 const BLE_LOG_MAX_QUEUE = 400;
 const BLE_LOG_MAX_BATCH = 200;
 const BLE_LOG_MAX_ORPHAN_CHARS = 2000;

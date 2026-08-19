@@ -75,6 +75,11 @@ store.seed_default_device(
 
 broker = EventBroker(DemoConfig.EVENT_BACKLOG_SIZE)
 
+# BLE shell output is high volume and only of interest to admins. It rides its
+# own broker with no backlog, so it can never crowd an uplink out of a customer
+# dashboard's history or event queue. Its history lives in the database.
+ble_broker = EventBroker(0)
+
 
 def _persist_uplink(event: dict) -> None:
     """Store every uplink that carries a payload so customers can browse
@@ -131,7 +136,9 @@ def _persist_message(event: dict) -> None:
         detail = detail or f"MessageId {event.get('message_id') or 'unknown'}"
 
     try:
-        store.record_message(
+        # Hooks run before listeners are notified and share this dict, so the row
+        # id reaches the admin stream with the event itself.
+        event["log_id"] = store.record_message(
             ts=event.get("ts") or "",
             source="sidewalk",
             event_type=event_type,
@@ -875,7 +882,7 @@ def ble_log():
 
     for text in lines:
         try:
-            store.record_message(
+            log_id = store.record_message(
                 ts="",
                 source="ble",
                 event_type="ble_shell",
@@ -888,7 +895,102 @@ def ble_log():
             LOGGER.warning("Failed to persist a BLE shell line", exc_info=True)
             return jsonify({"ok": False, "error": "Could not store the BLE log"}), 500
 
+        ble_broker.publish(
+            {
+                "type": "ble_shell",
+                "log_id": log_id,
+                "source": "ble",
+                "event_type": "ble_shell",
+                "wireless_device_id": device["wireless_device_id"] if device else None,
+                "device_name": device["name"] if device else None,
+                "ble_name": ble_name,
+                "detail": text,
+            }
+        )
+
     return jsonify({"ok": True, "stored": len(lines)})
+
+
+@app.get("/api/admin/stream")
+@admin_required
+def admin_stream():
+    """Live feed of every message, BLE shell lines included.
+
+    One queue subscribes to both brokers so a single blocking read serves the
+    merged stream. Rows carry ``log_id``, which the page uses as its cursor when
+    backfilling after a reconnect.
+    """
+
+    def encode_event(event: dict) -> str:
+        payload = json.dumps(_admin_stream_row(event), ensure_ascii=False, separators=(",", ":"))
+        return f"data: {payload}\n\n"
+
+    def stream():
+        listener, _ = broker.open_stream(after_event_id=0, maxsize=256)
+        ble_broker.open_stream(after_event_id=0, listener=listener)
+        try:
+            yield "retry: 3000\n\n"
+            while True:
+                try:
+                    event = listener.get(timeout=20)
+                except queue.Empty:
+                    yield "event: ping\ndata: {}\n\n"
+                    continue
+                if event.get("type") == "ble_shell" or event.get("type") in MESSAGE_EVENT_TYPES:
+                    yield encode_event(event)
+        finally:
+            broker.close_stream(listener)
+            ble_broker.close_stream(listener)
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    }
+    return Response(stream(), mimetype="text/event-stream", headers=headers)
+
+
+def _admin_stream_row(event: dict) -> dict:
+    """Shape a published event like a row from /api/admin/messages."""
+    wireless_device_id = event.get("wireless_device_id")
+    device_name = event.get("device_name")
+    if wireless_device_id and not device_name:
+        device = store.device_by_wireless_id(wireless_device_id)
+        device_name = device["name"] if device else None
+
+    payload_json = event.get("payload_json")
+    if event.get("type") == "location":
+        payload_json = {
+            key: event.get(key)
+            for key in (
+                "latitude",
+                "longitude",
+                "altitude",
+                "horizontal_accuracy",
+                "measurement_type",
+            )
+            if event.get(key) is not None
+        }
+
+    detail = event.get("detail") or ""
+    if event.get("type") == "uplink_raw":
+        detail = detail or event.get("raw") or ""
+    elif event.get("type") == "downlink_sent":
+        detail = detail or f"MessageId {event.get('message_id') or 'unknown'}"
+
+    return {
+        "id": event.get("log_id"),
+        "ts": event.get("ts"),
+        "source": event.get("source") or "sidewalk",
+        "event_type": event.get("event_type") or event.get("type"),
+        "wireless_device_id": wireless_device_id,
+        "device_name": device_name,
+        "ble_name": event.get("ble_name"),
+        "link_name": event.get("link_name"),
+        "payload_text": event.get("payload_text") or event.get("text"),
+        "payload_hex": event.get("payload_hex"),
+        "payload_json": payload_json,
+        "detail": detail,
+    }
 
 
 @app.get("/api/admin/messages")

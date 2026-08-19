@@ -2468,9 +2468,23 @@ button.ble-nearby-device:focus-visible {
   flex: 0 0 auto;
 }
 
-.msg-filters .action-status {
-  margin: 0 0 0 auto;
+.msg-filters .live-badge {
+  margin-left: auto;
   align-self: center;
+}
+
+/* New rows land at the top; a brief tint marks what just arrived. */
+.msg-row--fresh {
+  animation: msg-row-in 1.2s ease-out;
+}
+
+@keyframes msg-row-in {
+  from {
+    background: rgba(0, 169, 206, 0.14);
+  }
+  to {
+    background: transparent;
+  }
 }
 
 .msg-table {

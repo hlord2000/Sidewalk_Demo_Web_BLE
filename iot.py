@@ -230,8 +230,19 @@ class EventBroker:
                 except queue.Full:
                     LOGGER.warning("Dropping SSE event for a slow listener")
 
-    def open_stream(self, after_event_id: int = 0) -> tuple[queue.Queue, list[dict[str, Any]]]:
-        listener: queue.Queue = queue.Queue(maxsize=32)
+    def open_stream(
+        self,
+        after_event_id: int = 0,
+        listener: queue.Queue | None = None,
+        maxsize: int = 32,
+    ) -> tuple[queue.Queue, list[dict[str, Any]]]:
+        """Subscribe to this broker.
+
+        Passing an existing ``listener`` subscribes one queue to several
+        brokers, so a single consumer can block on one merged stream.
+        """
+        if listener is None:
+            listener = queue.Queue(maxsize=maxsize)
         with self._lock:
             self._listeners.add(listener)
             latest_event_id = self._next_event_id - 1

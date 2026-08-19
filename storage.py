@@ -387,15 +387,16 @@ class DemoStore:
         payload_json: Any | None = None,
         detail: str | None = None,
         reported_by_user_id: int | None = None,
-    ) -> None:
-        """Persist one message for the admin message log.
+    ) -> int:
+        """Persist one message for the admin message log, returning its row id.
 
         Covers both directions of Sidewalk traffic and the raw BLE shell output
         forwarded by browsers, so an admin can see everything a board said
-        regardless of which link carried it.
+        regardless of which link carried it. The row id doubles as the cursor the
+        admin page uses to tell live rows from ones it already has.
         """
         with self.connect() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 INSERT INTO messages
                     (ts, source, event_type, wireless_device_id, ble_name, link_name,
@@ -418,6 +419,7 @@ class DemoStore:
                     utc_now_iso(),
                 ),
             )
+            row_id = int(cursor.lastrowid)
             conn.execute(
                 """
                 DELETE FROM messages
@@ -425,6 +427,7 @@ class DemoStore:
                 """,
                 (MESSAGE_LOG_CAP,),
             )
+        return row_id
 
     def list_messages(
         self,
@@ -507,6 +510,16 @@ class DemoStore:
                 (device_id,),
             ).fetchone()
             return self._decode_device_row(row) if row else None
+
+    def device_by_wireless_id(self, wireless_device_id: str) -> dict[str, Any] | None:
+        if not wireless_device_id:
+            return None
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT id, name FROM devices WHERE wireless_device_id = ?",
+                (wireless_device_id,),
+            ).fetchone()
+            return dict(row) if row else None
 
     def get_device_for_user(self, user: dict[str, Any], device_id: int) -> dict[str, Any] | None:
         device = self.get_device(device_id)
