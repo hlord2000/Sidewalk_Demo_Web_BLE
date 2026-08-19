@@ -36,6 +36,12 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_WEB_SHELL_NAME_MATCH = "Nordic UART or Sidewalk BLE service"
 LEGACY_WEB_SHELL_NAME_PREFIX = "XIAO-WebShell"
 
+# Event types that represent traffic to or from a device, as opposed to
+# cloud-bridge status chatter, which the admin message log leaves out.
+MESSAGE_EVENT_TYPES = {"uplink", "uplink_raw", "location", "downlink_sent"}
+BLE_LOG_MAX_LINES = 200
+BLE_LOG_MAX_LINE_CHARS = 512
+
 WEB_DEMO_ROOT = Path(__file__).resolve().parent
 FLASH_IMAGE_MANIFEST = {
     "aodemo1": {
@@ -92,6 +98,55 @@ def _persist_uplink(event: dict) -> None:
 
 
 broker.add_hook(_persist_uplink)
+
+
+def _persist_message(event: dict) -> None:
+    """Mirror device traffic into the admin message log.
+
+    The customer dashboard only ever shows one device at a time; admins need
+    every message with the device it came from, surviving restarts.
+    """
+    event_type = event.get("type")
+    if event_type not in MESSAGE_EVENT_TYPES:
+        return
+
+    detail = event.get("detail") or ""
+    payload_json = event.get("payload_json")
+    if event_type == "uplink_raw":
+        detail = detail or event.get("raw") or ""
+    elif event_type == "location":
+        payload_json = {
+            key: event.get(key)
+            for key in (
+                "latitude",
+                "longitude",
+                "altitude",
+                "horizontal_accuracy",
+                "measurement_type",
+            )
+            if event.get(key) is not None
+        }
+        detail = detail or "AWS resolved a Sidewalk location"
+    elif event_type == "downlink_sent":
+        detail = detail or f"MessageId {event.get('message_id') or 'unknown'}"
+
+    try:
+        store.record_message(
+            ts=event.get("ts") or "",
+            source="sidewalk",
+            event_type=event_type,
+            wireless_device_id=event.get("wireless_device_id"),
+            link_name=event.get("link_name"),
+            payload_text=event.get("payload_text") or event.get("text"),
+            payload_hex=event.get("payload_hex"),
+            payload_json=payload_json,
+            detail=detail,
+        )
+    except Exception:
+        LOGGER.warning("Failed to persist message for the admin log", exc_info=True)
+
+
+broker.add_hook(_persist_message)
 
 cloud_service = SidewalkCloudService(DemoConfig, broker)
 cloud_service.start(store.unique_uplink_topics())
@@ -782,6 +837,89 @@ def events():
         "X-Accel-Buffering": "no",
     }
     return Response(stream(), mimetype="text/event-stream", headers=headers)
+
+
+@app.post("/api/ble-log")
+@login_required
+def ble_log():
+    """Store raw BLE shell output forwarded by a browser.
+
+    Only the browser holding the BLE link can see this traffic, so it is posted
+    here to reach the admin message log. Lines are stored, never broadcast to
+    other dashboards.
+    """
+    user = current_user()
+    assert user is not None
+
+    body = request.get_json(silent=True) or {}
+    posted_lines = body.get("lines")
+    if not isinstance(posted_lines, list):
+        return jsonify({"ok": False, "error": "lines must be a list"}), 400
+
+    device = None
+    requested_device_id = body.get("deviceId")
+    if requested_device_id not in (None, ""):
+        try:
+            device = store.get_device_for_user(user, int(requested_device_id))
+        except (TypeError, ValueError):
+            device = None
+        if device is None:
+            return jsonify({"ok": False, "error": "Device not found"}), 404
+
+    ble_name = str(body.get("bleName") or "")[:64]
+    lines = []
+    for line in posted_lines[:BLE_LOG_MAX_LINES]:
+        text = str(line).strip()
+        if text:
+            lines.append(text[:BLE_LOG_MAX_LINE_CHARS])
+
+    for text in lines:
+        try:
+            store.record_message(
+                ts="",
+                source="ble",
+                event_type="ble_shell",
+                wireless_device_id=device["wireless_device_id"] if device else None,
+                ble_name=ble_name,
+                detail=text,
+                reported_by_user_id=user["id"],
+            )
+        except Exception:
+            LOGGER.warning("Failed to persist a BLE shell line", exc_info=True)
+            return jsonify({"ok": False, "error": "Could not store the BLE log"}), 500
+
+    return jsonify({"ok": True, "stored": len(lines)})
+
+
+@app.get("/api/admin/messages")
+@admin_required
+def admin_messages():
+    """Every message across every device, newest first.
+
+    ``after`` returns only what the caller has not seen, so the admin page can
+    poll cheaply.
+    """
+    try:
+        after_id = max(0, int(request.args.get("after", "0")))
+    except ValueError:
+        after_id = 0
+    try:
+        limit = int(request.args.get("limit", "200"))
+    except ValueError:
+        limit = 200
+
+    wireless_device_id = request.args.get("device", "").strip()
+    source = request.args.get("source", "").strip().lower()
+    if source not in ("ble", "sidewalk"):
+        source = ""
+
+    messages = store.list_messages(
+        limit=limit,
+        after_id=after_id,
+        wireless_device_id=wireless_device_id or None,
+        source=source or None,
+    )
+    return jsonify({"ok": True, "count": len(messages), "messages": messages})
 
 
 SENSOR_HISTORY_RANGES = {

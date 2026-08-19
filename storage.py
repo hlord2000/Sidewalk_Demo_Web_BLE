@@ -15,6 +15,11 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+# The message log is an admin debugging aid, not a system of record, so it is
+# capped instead of growing without bound.
+MESSAGE_LOG_CAP = 5000
+
+
 @dataclass
 class AuthResult:
     ok: bool
@@ -97,6 +102,25 @@ class DemoStore:
 
                 CREATE INDEX IF NOT EXISTS idx_sensor_readings_wid_ts
                     ON sensor_readings (wireless_device_id, ts);
+
+                CREATE TABLE IF NOT EXISTS messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    wireless_device_id TEXT,
+                    ble_name TEXT,
+                    link_name TEXT,
+                    payload_text TEXT,
+                    payload_hex TEXT,
+                    payload_json TEXT,
+                    detail TEXT,
+                    reported_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_messages_wid_id
+                    ON messages (wireless_device_id, id);
                 """
             )
             conn.execute(
@@ -348,6 +372,106 @@ class DemoStore:
             item["payload_json"] = json.loads(raw) if raw else None
             readings.append(item)
         return readings
+
+    def record_message(
+        self,
+        *,
+        ts: str,
+        source: str,
+        event_type: str,
+        wireless_device_id: str | None = None,
+        ble_name: str | None = None,
+        link_name: str | None = None,
+        payload_text: str | None = None,
+        payload_hex: str | None = None,
+        payload_json: Any | None = None,
+        detail: str | None = None,
+        reported_by_user_id: int | None = None,
+    ) -> None:
+        """Persist one message for the admin message log.
+
+        Covers both directions of Sidewalk traffic and the raw BLE shell output
+        forwarded by browsers, so an admin can see everything a board said
+        regardless of which link carried it.
+        """
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO messages
+                    (ts, source, event_type, wireless_device_id, ble_name, link_name,
+                     payload_text, payload_hex, payload_json, detail,
+                     reported_by_user_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ts or utc_now_iso(),
+                    source,
+                    event_type,
+                    wireless_device_id or None,
+                    ble_name or None,
+                    link_name or None,
+                    payload_text or None,
+                    payload_hex or None,
+                    json.dumps(payload_json) if payload_json is not None else None,
+                    detail or None,
+                    reported_by_user_id,
+                    utc_now_iso(),
+                ),
+            )
+            conn.execute(
+                """
+                DELETE FROM messages
+                WHERE id <= (SELECT MAX(id) FROM messages) - ?
+                """,
+                (MESSAGE_LOG_CAP,),
+            )
+
+    def list_messages(
+        self,
+        *,
+        limit: int = 200,
+        after_id: int = 0,
+        wireless_device_id: str | None = None,
+        source: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Newest-first messages across every device, for the admin log.
+
+        ``after_id`` lets the admin page poll for just what it has not seen yet.
+        """
+        clauses = []
+        params: list[Any] = []
+        if after_id:
+            clauses.append("m.id > ?")
+            params.append(after_id)
+        if wireless_device_id:
+            clauses.append("m.wireless_device_id = ?")
+            params.append(wireless_device_id)
+        if source:
+            clauses.append("m.source = ?")
+            params.append(source)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(max(1, min(limit, 1000)))
+
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT m.*, d.name AS device_name
+                FROM messages m
+                LEFT JOIN devices d ON d.wireless_device_id = m.wireless_device_id
+                {where}
+                ORDER BY m.id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+
+        messages = []
+        for row in rows:
+            item = dict(row)
+            raw = item.get("payload_json")
+            item["payload_json"] = json.loads(raw) if raw else None
+            messages.append(item)
+        return messages
 
     def list_all_devices(self) -> list[dict[str, Any]]:
         with self.connect() as conn:

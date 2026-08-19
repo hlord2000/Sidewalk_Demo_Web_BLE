@@ -2,6 +2,7 @@
 {% block title %}Admin | Sidewalk Demo{% endblock %}
 {% block head %}
 <script defer src="{{ url_for('static', filename='ui.js', v='20260617admin2') }}"></script>
+<script defer src="{{ url_for('static', filename='admin.js', v='20260819messages') }}"></script>
 {% endblock %}
 {% block body %}
 <main class="page-shell app-shell">
@@ -45,6 +46,10 @@
     <button class="tab" role="tab" type="button" data-tab-target="devices" aria-selected="false">
       <svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="12" rx="2"/><path d="M9 20h6"/><path d="M12 16v4"/></svg>
       <span>Devices</span>
+    </button>
+    <button class="tab" role="tab" type="button" data-tab-target="messages" aria-selected="false">
+      <svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h16v11H8l-4 3z"/><path d="M8 11h8"/><path d="M8 14h5"/></svg>
+      <span>Messages</span>
     </button>
   </nav>
 
@@ -195,6 +200,55 @@
       </div>
     </div>
     {% endif %}
+  </section>
+
+  <!-- ====================== MESSAGES ====================== -->
+  <section class="tabpanel" data-tab-panel="messages" role="tabpanel" hidden>
+    <div class="admin-toolbar">
+      <div>
+        <p class="eyebrow">Traffic</p>
+        <h2>Messages <span class="toolbar-count" id="admin-message-count">0</span></h2>
+        <p class="muted">Every Sidewalk message and every raw BLE shell line, with the device it came from.</p>
+      </div>
+    </div>
+
+    <div class="msg-filters">
+      <label class="msg-filter">
+        <span class="meta-key">Device</span>
+        <select id="admin-message-device">
+          <option value="">All devices</option>
+          {% for device in devices %}
+          <option value="{{ device.wireless_device_id }}">{{ device.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="msg-filter">
+        <span class="meta-key">Source</span>
+        <select id="admin-message-source">
+          <option value="">All links</option>
+          <option value="sidewalk">Sidewalk</option>
+          <option value="ble">BLE</option>
+        </select>
+      </label>
+      <button type="button" class="ghost-button" id="admin-message-refresh">Refresh</button>
+      <span class="muted action-status" id="admin-message-status">Loading messages…</span>
+    </div>
+
+    <div class="table-wrap">
+      <table class="data-table msg-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Device</th>
+            <th>Link</th>
+            <th>Type</th>
+            <th>Message</th>
+          </tr>
+        </thead>
+        <tbody id="admin-message-rows"></tbody>
+      </table>
+      <p class="table-empty" id="admin-message-empty">No messages recorded yet.</p>
+    </div>
   </section>
 
   <footer class="nordic-footer">

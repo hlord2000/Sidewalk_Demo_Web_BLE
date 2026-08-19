@@ -1592,6 +1592,7 @@ async function bindConnectedIdentity(event) {
   }
 
   bleIdentifiedDevice = device;
+  bleLogDeviceId = device.id;
   await activateDevice(device);
   updateConnectedDeviceUi(device);
   settleBleIdentityWait(null, device);
@@ -1802,6 +1803,82 @@ function updateSelectedDeviceUi() {
   }
 
   config.webShellNamePrefix = BLE_DEVICE_MATCH_LABEL;
+}
+
+// Raw BLE shell output is only visible to the browser holding the link, so it is
+// batched up to the server for the admin message log.
+const BLE_LOG_FLUSH_MS = 1500;
+const BLE_LOG_MAX_QUEUE = 400;
+const BLE_LOG_MAX_BATCH = 200;
+const BLE_LOG_MAX_ORPHAN_CHARS = 2000;
+let bleLogQueue = [];
+let bleLogBuffer = "";
+let bleLogTimer = null;
+let bleLogInFlight = false;
+// Attribution for the current BLE session. Held separately from bleDevice /
+// bleIdentifiedDevice so a flush that lands after the link drops still credits
+// the board the output actually came from.
+let bleLogDeviceId = null;
+let bleLogBleName = "";
+
+function queueBleLogText(text) {
+  bleLogBuffer += text;
+
+  let breakIndex;
+  while ((breakIndex = bleLogBuffer.search(/[\r\n]/)) >= 0) {
+    const line = stripAnsi(bleLogBuffer.slice(0, breakIndex)).trim();
+    bleLogBuffer = bleLogBuffer.slice(breakIndex + 1);
+    if (line) {
+      bleLogQueue.push(line);
+    }
+  }
+
+  // A board that never emits a newline must not grow the buffer forever.
+  if (bleLogBuffer.length > BLE_LOG_MAX_ORPHAN_CHARS) {
+    const orphan = stripAnsi(bleLogBuffer).trim();
+    bleLogBuffer = "";
+    if (orphan) {
+      bleLogQueue.push(orphan);
+    }
+  }
+
+  if (bleLogQueue.length > BLE_LOG_MAX_QUEUE) {
+    bleLogQueue = bleLogQueue.slice(-BLE_LOG_MAX_QUEUE);
+  }
+
+  if (!bleLogTimer) {
+    bleLogTimer = window.setTimeout(flushBleLog, BLE_LOG_FLUSH_MS);
+  }
+}
+
+async function flushBleLog() {
+  bleLogTimer = null;
+  if (bleLogInFlight || !bleLogQueue.length) {
+    return;
+  }
+
+  const batch = bleLogQueue.slice(0, BLE_LOG_MAX_BATCH);
+  bleLogQueue = bleLogQueue.slice(batch.length);
+  bleLogInFlight = true;
+  try {
+    await fetch("/api/ble-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        // Null while the board is unverified: the server records it by BLE name.
+        deviceId: bleLogDeviceId,
+        bleName: bleLogBleName,
+        lines: batch,
+      }),
+    });
+  } catch (error) {
+    bleDebugError("Could not forward BLE output to the server", error);
+  } finally {
+    bleLogInFlight = false;
+    if (bleLogQueue.length && !bleLogTimer) {
+      bleLogTimer = window.setTimeout(flushBleLog, BLE_LOG_FLUSH_MS);
+    }
+  }
 }
 
 function appendTerminal(text) {
@@ -2529,7 +2606,9 @@ async function connectBleShell(
     const tail = textDecoder.decode();
     if (tail) {
       appendTerminal(tail);
+      queueBleLogText(tail);
     }
+    flushBleLog();
     resetBleShellState();
     setBleStatus("Disconnected");
     appendTerminal("\n[disconnected]\n");
@@ -2540,6 +2619,8 @@ async function connectBleShell(
     bluetoothDeviceId: bleDevice.id,
   });
   bleServer = await bleDevice.gatt.connect();
+  bleLogDeviceId = null;
+  bleLogBleName = bleDevice.name || "";
   bleDebug("GATT connected", {
     name: bleDevice.name,
     bluetoothDeviceId: bleDevice.id,
@@ -2584,6 +2665,7 @@ async function connectBleShell(
   bleTxCharacteristic.addEventListener("characteristicvaluechanged", (event) => {
     const chunk = textDecoder.decode(event.target.value, { stream: true });
     appendTerminal(chunk);
+    queueBleLogText(chunk);
   });
 
   setConnState(true);

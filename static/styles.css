@@ -2449,3 +2449,57 @@ button.ble-nearby-device:focus-visible {
     width: 100%;
   }
 }
+
+/* ==========================================================================
+   Admin message log — one row per message, mixing Sidewalk traffic and raw
+   BLE shell lines, so rows stay legible without truncating payloads.
+   ========================================================================== */
+.msg-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.8rem;
+  margin: 1.1rem 0 0.9rem;
+}
+
+/* Labels are full-width grids by default; the filter bar wants them inline. */
+.msg-filter {
+  width: 13rem;
+  flex: 0 0 auto;
+}
+
+.msg-filters .action-status {
+  margin: 0 0 0 auto;
+  align-self: center;
+}
+
+.msg-table {
+  min-width: 58rem;
+}
+
+.msg-table td {
+  font-size: 0.85rem;
+}
+
+.msg-table .msg-when {
+  white-space: nowrap;
+}
+
+.msg-table code {
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.msg-table .msg-body {
+  width: 45%;
+}
+
+.msg-table .pill {
+  min-height: 1.8rem;
+  padding: 0.15rem 0.6rem;
+  font-size: 0.74rem;
+}
+
+.msg-table .muted {
+  font-size: 0.76rem;
+}

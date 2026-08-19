@@ -7,12 +7,15 @@ Flask web app for a Sidewalk device demo:
 - live uplink monitoring via AWS IoT MQTT over SSE
 - Web Bluetooth shell over Nordic UART Service
 - browser controls for Sidewalk Location scans and reports
+- admin message log: every Sidewalk message and every raw BLE shell line, with
+  the device it came from
 
 ## Repo Layout
 
 - `app.py`: Flask entry point
 - `config.py`: environment-variable based runtime config
 - `iot.py`: AWS IoT Wireless downlink + MQTT uplink bridge
+- `storage.py`: SQLite store (users, devices, sensor history, message log)
 - `templates/`, `static/`: UI
 - `railway.json`: Railway start and health-check config
 - `.env.example`: required environment variables
