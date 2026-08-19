@@ -7,7 +7,7 @@
 <script defer src="{{ url_for('static', filename='vendor/dap.umd.js', v='20260423webusb') }}"></script>
 <script defer src="{{ url_for('static', filename='ui.js', v='20260618loop') }}"></script>
 <script defer src="{{ url_for('static', filename='sensors.js', v='20260618tsfix') }}"></script>
-<script defer src="{{ url_for('static', filename='app.js', v='20260730bledebug2') }}"></script>
+<script defer src="{{ url_for('static', filename='app.js', v='20260819anydevice') }}"></script>
 {% endblock %}
 {% block body %}
 <main class="page-shell app-shell">
@@ -144,6 +144,7 @@
           <div class="inline-actions console-actions">
             <button id="ble-scan" type="button" class="ghost-button">Scan Nearby</button>
             <button id="ble-connect" type="button">Connect</button>
+            <button id="ble-connect-any" type="button" class="ghost-button" title="List every advertising Bluetooth device and pick one by name — use this for boards on older firmware that do not advertise a Sidewalk identity">Any Device…</button>
             <button id="ble-disconnect" type="button" class="ghost-button">Disconnect</button>
           </div>
           <p id="ble-status" class="conn-state conn-state--off">Disconnected</p>

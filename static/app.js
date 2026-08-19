@@ -20,6 +20,7 @@ const bleCommandForm = document.getElementById("ble-command-form");
 const bleCommandInput = document.getElementById("ble-command");
 const bleScanButton = document.getElementById("ble-scan");
 const bleConnectButton = document.getElementById("ble-connect");
+const bleConnectAnyButton = document.getElementById("ble-connect-any");
 const bleDisconnectButton = document.getElementById("ble-disconnect");
 const bleNearby = document.getElementById("ble-nearby");
 const bleNearbyList = document.getElementById("ble-nearby-list");
@@ -700,6 +701,7 @@ let bleTxCharacteristic = null;
 let bleConnectedProfile = null;
 let bleIdentifiedDevice = null;
 let bleIdentityWait = null;
+let bleManualSession = false;
 let bleScan = null;
 let bleScanStopTimer = null;
 let bleAdvertisementListenerInstalled = false;
@@ -1574,7 +1576,7 @@ async function bindConnectedIdentity(event) {
     );
     settleBleIdentityWait(error);
     setBleStatus(error.message);
-    if (bleDevice && bleDevice.gatt && bleDevice.gatt.connected) {
+    if (!bleManualSession && bleDevice && bleDevice.gatt && bleDevice.gatt.connected) {
       bleDevice.gatt.disconnect();
     }
     return;
@@ -1583,7 +1585,7 @@ async function bindConnectedIdentity(event) {
   if (smsn && device.sidewalkSmsn && smsn !== device.sidewalkSmsn) {
     const error = new Error(`Identity fingerprint collision for ${fingerprint}`);
     settleBleIdentityWait(error);
-    if (bleDevice && bleDevice.gatt && bleDevice.gatt.connected) {
+    if (!bleManualSession && bleDevice && bleDevice.gatt && bleDevice.gatt.connected) {
       bleDevice.gatt.disconnect();
     }
     return;
@@ -1840,6 +1842,7 @@ let locationGatewayState = null;
 
 function resetBleShellState() {
   settleBleIdentityWait(new Error("BLE disconnected before identity verification"));
+  bleManualSession = false;
   bleDevice = null;
   bleServer = null;
   bleRxCharacteristic = null;
@@ -2439,39 +2442,71 @@ async function runLocationAction(action) {
   }
 }
 
-async function connectBleShell(source = "connect-button", { matchAnyAssigned = false } = {}) {
+async function connectBleShell(
+  source = "connect-button",
+  { matchAnyAssigned = false, anyDevice = false } = {},
+) {
   if (!navigator.bluetooth) {
     setBleStatus("Web Bluetooth is not available in this browser");
     return;
   }
 
   stopBleNearbyScan();
-  const selectedDevice = await ensureDeviceIdentity(currentDevice());
+  bleManualSession = anyDevice;
+
+  let selectedDevice = null;
+  if (anyDevice) {
+    // A board on older firmware may not advertise an identity at all, so a missing
+    // or unresolvable AWS identity must not block the manual chooser.
+    selectedDevice = currentDevice();
+    if (selectedDevice) {
+      try {
+        await ensureDeviceIdentity(selectedDevice);
+      } catch (error) {
+        bleDebugError("Could not preload the selected device identity", error);
+      }
+    }
+  } else {
+    selectedDevice = await ensureDeviceIdentity(currentDevice());
+  }
+
   bleDebug("Opening Web Bluetooth chooser", {
     source,
     matchAnyAssigned,
-    awsDevice: selectedDevice.name,
-    wirelessDeviceId: selectedDevice.wirelessDeviceId,
-    identityFingerprint: selectedDevice.identityFingerprint,
+    anyDevice,
+    awsDevice: selectedDevice && selectedDevice.name,
+    wirelessDeviceId: selectedDevice && selectedDevice.wirelessDeviceId,
+    identityFingerprint: selectedDevice && selectedDevice.identityFingerprint,
   });
-  setBleStatus(
-    matchAnyAssigned
-      ? "Scanning for WebShells assigned to this account…"
-      : `Scanning only for ${selectedDevice.name} · ${selectedDevice.identityFingerprint}…`,
-  );
-  const optionalServices = BLE_PROFILES.map((profile) => profile.serviceUuid);
-  const filters = matchAnyAssigned
-    ? bleAssignedDeviceFilters()
-    : bleRequestFilters(selectedDevice);
-
-  if (!filters.length) {
-    throw new Error("The selected AWS device does not have an advertised BLE identity");
+  if (anyDevice) {
+    setBleStatus("Listing every nearby Bluetooth device — pick your board by its advertised name…");
+  } else if (matchAnyAssigned) {
+    setBleStatus("Scanning for WebShells assigned to this account…");
+  } else {
+    setBleStatus(`Scanning only for ${selectedDevice.name} · ${selectedDevice.identityFingerprint}…`);
   }
 
-  const chooserOptions = {
-    filters,
-    optionalServices,
-  };
+  const optionalServices = BLE_PROFILES.map((profile) => profile.serviceUuid);
+  let chooserOptions;
+  if (anyDevice) {
+    chooserOptions = {
+      acceptAllDevices: true,
+      optionalServices,
+    };
+  } else {
+    const filters = matchAnyAssigned
+      ? bleAssignedDeviceFilters()
+      : bleRequestFilters(selectedDevice);
+
+    if (!filters.length) {
+      throw new Error("The selected AWS device does not have an advertised BLE identity");
+    }
+
+    chooserOptions = {
+      filters,
+      optionalServices,
+    };
+  }
   bleDebug("requestDevice options", chooserOptions);
   bleDevice = await navigator.bluetooth.requestDevice(chooserOptions);
   bleDebug("Chooser selected device", {
@@ -2554,7 +2589,39 @@ async function connectBleShell(source = "connect-button", { matchAnyAssigned = f
     const identityPromise = waitForBleIdentity();
     bleDebug("Sending identity verification command", { command: "sid identity" });
     await sendBleCommand("sid identity");
-    const identifiedDevice = await identityPromise;
+    let identifiedDevice = null;
+    try {
+      identifiedDevice = await identityPromise;
+    } catch (error) {
+      if (!bleManualSession) {
+        throw error;
+      }
+      bleDebugError("Identity verification failed for a manually chosen board", error);
+    }
+
+    if (!identifiedDevice) {
+      // Manually chosen board: keep the shell usable so old firmware can still be
+      // inspected and updated, but never rebind the dashboard to it.
+      const dashboardDevice = currentDevice();
+      setBleShellControlsDisabled(false);
+      updateConnectedDeviceUi({
+        name: bleDevice.name || "Unknown board",
+        wirelessDeviceId: "unverified",
+      });
+      setBleStatus(`Connected (unverified): ${bleDevice.name || "manual selection"}`);
+      setBleWorkflowStatus(
+        dashboardDevice
+          ? `Unverified board — shell commands go to ${bleDevice.name || "this board"}, the dashboard still shows ${dashboardDevice.name}.`
+          : "Unverified board — it did not report a Sidewalk identity assigned to this account.",
+      );
+      setLocationStatus("Verify the board's Sidewalk identity before requesting a location.");
+      appendTerminal(
+        `[warning] ${bleDevice.name || "This board"} did not report a Sidewalk identity assigned to this account; the session is unverified.\n`,
+      );
+      runBleShellCommand("sid flow status").catch(() => {});
+      return;
+    }
+
     bleDebug("Identity verification succeeded", {
       awsDevice: identifiedDevice.name,
       wirelessDeviceId: identifiedDevice.wirelessDeviceId,
@@ -2647,6 +2714,20 @@ if (bleConnectButton) {
       await connectBleShell();
     } catch (error) {
       bleDebugError("Connect flow failed", error);
+      if (bleDevice && bleDevice.gatt && bleDevice.gatt.connected) {
+        bleDevice.gatt.disconnect();
+      }
+      setBleStatus(`BLE error: ${error.message}`);
+    }
+  });
+}
+
+if (bleConnectAnyButton) {
+  bleConnectAnyButton.addEventListener("click", async () => {
+    try {
+      await connectBleShell("connect-any-button", { anyDevice: true });
+    } catch (error) {
+      bleDebugError("Connect (any device) flow failed", error);
       if (bleDevice && bleDevice.gatt && bleDevice.gatt.connected) {
         bleDevice.gatt.disconnect();
       }
