@@ -2082,6 +2082,12 @@ function ingestSensorEvent(event) {
 function renderEvent(event) {
   ingestSensorEvent(event);
 
+  // The log shows device messages only. Cloud-bridge status chatter — connecting,
+  // subscribed, listener up, and its failure counterparts — never appears here.
+  if (event.type === "service_status") {
+    return;
+  }
+
   const card = document.createElement("article");
   card.className = "event-card event-card--fresh";
 
