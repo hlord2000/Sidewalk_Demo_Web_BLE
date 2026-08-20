@@ -3233,3 +3233,77 @@ dialog,
 .ghost-button--link:hover {
   text-decoration: none;
 }
+
+/* --- One BLE row, full width, under the device id ------------------------- */
+/* The chip that said "BLE / not connected" and this line both reported the
+   same thing; this is the survivor because it also carries progress and
+   errors. The ink block is its label, its colour is the state. */
+.control-identity {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.control-identity > span {
+  width: 100%;
+}
+
+.conn-state {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0;
+  border: var(--edge);
+  border-left: var(--edge);
+  background: var(--panel);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+}
+
+.conn-state::before {
+  content: "BLE";
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  height: auto;
+  margin-right: 0.65rem;
+  padding: 0.45rem 0.55rem;
+  background: var(--ink-muted);
+  color: #fff;
+  font-family: var(--sans-bold);
+  font-weight: 700;
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+}
+
+.conn-state--on {
+  color: var(--ink);
+}
+
+.conn-state--on::before {
+  background: var(--success);
+}
+
+.conn-state--off::before {
+  background: var(--ink-muted);
+}
+
+/* DOM order decides the telemetry column now: the legacy flex `order` values
+   from the old three-slot layout would otherwise float the log below the
+   console. */
+.loop-log,
+.loop-console {
+  order: 0;
+  grid-column: auto;
+}
+
+/* The location block holds a single button; the card around it was framing
+   copy that no longer exists. */
+.location-control {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}

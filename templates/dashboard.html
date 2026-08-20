@@ -7,7 +7,7 @@
 <script defer src="{{ url_for('static', filename='vendor/dap.umd.js', v='20260423webusb') }}"></script>
 <script defer src="{{ url_for('static', filename='ui.js', v='20260618loop') }}"></script>
 <script defer src="{{ url_for('static', filename='sensors.js', v='20260618tsfix') }}"></script>
-<script defer src="{{ url_for('static', filename='app.js', v='20260820trim') }}"></script>
+<script defer src="{{ url_for('static', filename='app.js', v='20260820consolidate') }}"></script>
 {% endblock %}
 {% block body %}
 <main class="page-shell app-shell">
@@ -80,7 +80,17 @@
     </div>
 
     <div id="sensor-charts" class="chart-grid" hidden></div>
-
+    <article class="panel loop-log">
+      <details class="log-disclosure" open>
+        <summary>
+          <span class="panel-head-inline">
+            <h2>Raw Uplink Log</h2>
+          </span>
+          <span id="event-feed-status" class="live-badge live-badge--connecting">Connecting</span>
+        </summary>
+        <div id="event-log" class="event-log"></div>
+      </details>
+    </article>
     <article class="panel panel-console loop-console">
       <div class="panel-head">
         <h2>Nordic UART Console</h2>
@@ -100,17 +110,7 @@
         <button type="submit">Send Command</button>
       </form>
     </article>
-    <article class="panel loop-log">
-      <details class="log-disclosure" open>
-        <summary>
-          <span class="panel-head-inline">
-            <h2>Raw Uplink Log</h2>
-          </span>
-          <span id="event-feed-status" class="live-badge live-badge--connecting">Connecting</span>
-        </summary>
-        <div id="event-log" class="event-log"></div>
-      </details>
-    </article>
+
     </section>
 
 
@@ -142,17 +142,9 @@
             No assigned device
             {% endif %}
           </span>
-          <span id="selected-topic-chip">
-            {% if page_config.selectedUplinkTopic %}
-            <span class="meta-key">Topic</span> <code>{{ page_config.selectedUplinkTopic }}</code>
-            {% else %}
-            No uplink topic configured
-            {% endif %}
-          </span>
-          <span id="connected-device-chip">
-            <span class="meta-key">BLE</span> <code>not connected</code>
-          </span>
         </div>
+
+        <p id="ble-status" class="conn-state conn-state--off">Disconnected</p>
 
         <div class="control-connect">
           <div class="inline-actions console-actions">
@@ -161,7 +153,6 @@
             <button id="ble-connect-any" type="button" class="ghost-button" title="List every advertising Bluetooth device and pick one by name — use this for boards on older firmware that do not advertise a Sidewalk identity">Any Device…</button>
             <button id="ble-disconnect" type="button" class="ghost-button">Disconnect</button>
           </div>
-          <p id="ble-status" class="conn-state conn-state--off">Disconnected</p>
           <div id="ble-nearby" class="ble-nearby" hidden>
             <div class="ble-nearby-head">
               <span class="meta-key">Nearby WebShells</span>
@@ -211,81 +202,6 @@
           <p id="ble-workflow-status" class="muted action-status"></p>
         </div>
 
-        <details class="console-secondary">
-          <summary>Custom payload &amp; advanced commands</summary>
-          <div class="stack">
-            <form id="ble-payload-form" class="stack">
-              <label>
-                <span>Payload</span>
-                <textarea
-                  id="ble-payload"
-                  rows="3"
-                  placeholder="Message to send"></textarea>
-              </label>
-              <div class="inline-fields inline-fields--triple">
-                <label>
-                  <span>Link</span>
-                  <select id="ble-send-link">
-                    <option value="1">BLE</option>
-                    <option value="2">FSK</option>
-                    <option value="3">LoRa</option>
-                    <option value="8" selected>Any</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Route</span>
-                  <select id="ble-link-mode">
-                    <option value="1">Cloud</option>
-                    <option value="2">Mobile</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Type</span>
-                  <select id="ble-message-type">
-                    <option value="2">Notify</option>
-                    <option value="0">Get</option>
-                    <option value="1">Set</option>
-                    <option value="3">Response</option>
-                  </select>
-                </label>
-              </div>
-              <div class="inline-fields">
-                <label>
-                  <span>Encoding</span>
-                  <select id="ble-payload-encoding">
-                    <option value="text">UTF-8 Text</option>
-                    <option value="hex">Raw Hex</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Preset</span>
-                  <select id="ble-payload-preset">
-                    <option value="">Custom Payload</option>
-                    <option value="status">Request status</option>
-                    <option value="hello">Hello string</option>
-                    <option value="json">JSON sample</option>
-                  </select>
-                </label>
-              </div>
-              <div class="inline-actions">
-                <button type="submit">Send Payload</button>
-                <button type="button" id="ble-copy-command" class="ghost-button">Copy Command</button>
-              </div>
-            </form>
-
-            <p class="control-label">Flow &amp; stack commands</p>
-            <div class="inline-actions inline-actions--triple">
-              <button type="button" class="js-shell-command ghost-button" data-command="sid flow connect" title="sid flow connect">Connect link</button>
-              <button type="button" class="js-shell-command ghost-button" data-command="sid flow cancel" title="sid flow cancel">Cancel flow</button>
-              <button type="button" class="js-shell-command ghost-button" data-command="sid last_status" title="sid last_status">Last status</button>
-              <button type="button" class="js-shell-command ghost-button" data-command="sid init 7" title="sid init 7">Init all links</button>
-              <button type="button" class="js-shell-command ghost-button" data-command="sid start" title="sid start">Start</button>
-              <button type="button" class="js-shell-command ghost-button" data-command="sid stop" title="sid stop">Stop</button>
-              <button type="button" class="js-shell-command ghost-button" data-command="sid deinit" title="sid deinit">Deinit</button>
-            </div>
-
-          </div>
-        </details>
       </div>
     </article>
   </section>
