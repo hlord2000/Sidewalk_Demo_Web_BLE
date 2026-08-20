@@ -69,6 +69,12 @@ class DemoConfig:
     )
     SIDEWALK_DOWNLINK_ACK_RETRY_SECS = _int_env("SIDEWALK_DOWNLINK_ACK_RETRY_SECS", 10)
     SIDEWALK_MFG_STORAGE_ADDRESS = _auto_int_env("SIDEWALK_MFG_STORAGE_ADDRESS", 0x162000)
+    # Raw bytes per "prov set" fragment, before base64 expansion, for the BLE
+    # NUS provisioning command script. The largest single credential value is
+    # 64 bytes (a P256r1 public key or a signature), so this conservative
+    # default lets every value ship unfragmented; lower it if the real NUS
+    # MTU and shell line buffer budget turn out to be tighter than that.
+    SIDEWALK_PROVISIONING_MAX_FRAGMENT_BYTES = _int_env("SIDEWALK_PROVISIONING_MAX_FRAGMENT_BYTES", 64)
 
     MQTT_CLIENT_ID = _env("MQTT_CLIENT_ID", "sidewalk-web-demo")
     EVENT_BACKLOG_SIZE = _int_env("EVENT_BACKLOG_SIZE", 64)
@@ -89,3 +95,22 @@ class DemoConfig:
         "SIDEWALK_BLE_NOTIFY_UUID",
         "b32e83c0-fece-47c1-9015-53b7e7f0d2fe",
     )
+
+    # Memfault gateway. The device has no IP stack, so this backend forwards
+    # Memfault SDK "chunks" arriving as Sidewalk uplinks to Memfault's chunks
+    # API, and optionally reads device health back from Memfault's org API.
+    # Every value below defaults to "off", so the app boots with none of them set.
+    MEMFAULT_ENABLED = _bool_env("MEMFAULT_ENABLED", False)
+    MEMFAULT_PROJECT_KEY = _env("MEMFAULT_PROJECT_KEY", "")
+    MEMFAULT_ORG_SLUG = _env("MEMFAULT_ORG_SLUG", "")
+    MEMFAULT_PROJECT_SLUG = _env("MEMFAULT_PROJECT_SLUG", "")
+    MEMFAULT_ORG_AUTH_TOKEN = _env("MEMFAULT_ORG_AUTH_TOKEN", "")
+    MEMFAULT_CHUNKS_BASE_URL = _env("MEMFAULT_CHUNKS_BASE_URL", "https://chunks.memfault.com")
+    MEMFAULT_API_BASE_URL = _env("MEMFAULT_API_BASE_URL", "https://api.memfault.com")
+    # "smsn" (default) uses the device's Sidewalk manufacturing serial when known,
+    # falling back to its wireless_device_id. "wireless_device_id" always uses that.
+    MEMFAULT_DEVICE_SERIAL_SOURCE = _env("MEMFAULT_DEVICE_SERIAL_SOURCE", "smsn")
+    MEMFAULT_HTTP_TIMEOUT_SECS = _int_env("MEMFAULT_HTTP_TIMEOUT_SECS", 10)
+    MEMFAULT_CHUNK_MAX_ATTEMPTS = _int_env("MEMFAULT_CHUNK_MAX_ATTEMPTS", 8)
+    MEMFAULT_CHUNK_MAX_BACKOFF_SECS = _int_env("MEMFAULT_CHUNK_MAX_BACKOFF_SECS", 300)
+    MEMFAULT_WORKER_POLL_SECS = _int_env("MEMFAULT_WORKER_POLL_SECS", 5)

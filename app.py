@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -24,8 +25,10 @@ from flask import (
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+import provisioning
 from config import DemoConfig
 from iot import DownlinkRequest, EventBroker, SidewalkCloudService
+from memfault import MemfaultService
 from provisioning import ProvisioningError, build_sidewalk_mfg_bin, bytes_to_ihex, merge_ihex
 from storage import DemoStore
 
@@ -38,7 +41,8 @@ LEGACY_WEB_SHELL_NAME_PREFIX = "XIAO-WebShell"
 
 # Event types that represent traffic to or from a device, as opposed to
 # cloud-bridge status chatter, which the admin message log leaves out.
-MESSAGE_EVENT_TYPES = {"uplink", "uplink_raw", "location", "downlink_sent"}
+MESSAGE_EVENT_TYPES = {"uplink", "uplink_raw", "location", "downlink_sent", "memfault_chunk"}
+PROVISIONING_STATUSES = {"attempted", "succeeded", "verified", "failed"}
 BLE_LOG_MAX_LINES = 200
 BLE_LOG_MAX_LINE_CHARS = 512
 
@@ -155,8 +159,28 @@ def _persist_message(event: dict) -> None:
 
 broker.add_hook(_persist_message)
 
+memfault_service = MemfaultService(DemoConfig, store, broker)
+
+
+def _persist_memfault_chunk(event: dict) -> None:
+    """Queue a detected Memfault chunk for forwarding.
+
+    Runs after _persist_message, so event["log_id"] is already set and the
+    queued row can be linked back to its message-log entry.
+    """
+    if event.get("type") != "memfault_chunk":
+        return
+    try:
+        memfault_service.enqueue_chunk_from_event(event)
+    except Exception:
+        LOGGER.warning("Failed to enqueue a Memfault chunk", exc_info=True)
+
+
+broker.add_hook(_persist_memfault_chunk)
+
 cloud_service = SidewalkCloudService(DemoConfig, broker)
 cloud_service.start(store.unique_uplink_topics())
+memfault_service.start()
 
 
 def login_required(view):
@@ -197,24 +221,9 @@ def _web_shell_name_match(value: str | None) -> str:
 
 
 def _device_sidewalk_smsn(device: dict) -> str:
-    wireless_device_json = device.get("wireless_device_json") or {}
-    provisioning_json = device.get("provisioning_json") or {}
-    raw_smsn = (
-        (wireless_device_json.get("Sidewalk") or {}).get("SidewalkManufacturingSn")
-        or (provisioning_json.get("metadata") or {}).get("smsn")
-        or ""
+    return provisioning.device_sidewalk_smsn(
+        device.get("wireless_device_json"), device.get("provisioning_json")
     )
-    if not isinstance(raw_smsn, str):
-        return ""
-
-    compact_smsn = "".join(character for character in raw_smsn if character not in ":- \t\r\n")
-    if len(compact_smsn) != 64:
-        return ""
-    try:
-        bytes.fromhex(compact_smsn)
-    except ValueError:
-        return ""
-    return compact_smsn.upper()
 
 
 def _device_summary(device: dict) -> dict:
@@ -229,6 +238,12 @@ def _device_summary(device: dict) -> dict:
         "customerEmail": device.get("customer_email") or "",
         "sidewalkSmsn": sidewalk_smsn,
         "identityFingerprint": sidewalk_smsn[:16],
+        "hasProvisioningArtifacts": bool(
+            device.get("wireless_device_json") and device.get("device_profile_json")
+        ),
+        "provisioningStatus": device.get("provisioning_status"),
+        "provisioningStatusAt": device.get("provisioning_status_at"),
+        "provisioningStatusReason": device.get("provisioning_status_reason"),
     }
 
 
@@ -480,6 +495,217 @@ def device_identity():
     return jsonify({"ok": True, "device": summary})
 
 
+def _mfg_values_for_device(device: dict) -> dict[int, bytes]:
+    """Per sid_pal_mfg_store_value_t manufacturing values for a device.
+
+    Raises ValueError/ProvisioningError when the device has no usable AWS or
+    certificate.json artifacts yet; callers turn that into a 400 response.
+    """
+    wireless_device_json, device_profile_json, _ = _load_or_refresh_artifacts(device)
+    return provisioning.mfg_store_values(wireless_device_json, device_profile_json)
+
+
+@app.get("/api/devices/<int:device_id>/provisioning-values")
+@login_required
+def device_provisioning_values(device_id: int):
+    """Manufacturing credentials for a device as named, per-value entries.
+
+    Keyed by the numeric sid_pal_mfg_store_value_t id firmware expects in
+    sid_pal_mfg_store_write(value_id, buffer, length). Most callers want
+    /provisioning-script instead; this exists for a caller that wants to
+    drive the write sequence itself. Gated the same way as the existing
+    full-firmware provisioning download (/firmware-images/<id>?provision=1):
+    admins, or customers the admin has marked can_provision.
+    """
+    user = current_user()
+    assert user is not None
+    if not _can_provision_firmware(user):
+        return jsonify({"ok": False, "error": "Not authorized to provision devices"}), 403
+
+    device = store.get_device_for_user(user, device_id)
+    if device is None:
+        return jsonify({"ok": False, "error": "Device not found"}), 404
+
+    try:
+        mfg_values = _mfg_values_for_device(device)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": f"Device has no AWS provisioning artifacts yet: {exc}"}), 400
+    except ProvisioningError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        LOGGER.exception("Failed to build provisioning values for device %s", device_id)
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    values = {
+        str(value_id): {
+            "name": provisioning.MFG_STORE_VALUE_NAMES.get(value_id, ""),
+            "length": len(value_bytes),
+            "base64": base64.b64encode(value_bytes).decode("ascii"),
+        }
+        for value_id, value_bytes in mfg_values.items()
+    }
+    return jsonify({"ok": True, "values": values})
+
+
+@app.get("/api/devices/<int:device_id>/provisioning-script")
+@login_required
+def device_provisioning_script(device_id: int):
+    """The ready-to-send BLE NUS command script for provisioning a device.
+
+    Primary provisioning path: the browser writes each returned command to
+    the NUS RX characteristic in order, then watches the NUS shell (relayed
+    through /api/ble-log) for the EVT:{"t":"provdone",...} terminal event.
+    The exact command grammar is pending firmware confirmation; see
+    provisioning.build_provisioning_commands for the single place that
+    assembles it.
+    """
+    user = current_user()
+    assert user is not None
+    if not _can_provision_firmware(user):
+        return jsonify({"ok": False, "error": "Not authorized to provision devices"}), 403
+
+    device = store.get_device_for_user(user, device_id)
+    if device is None:
+        return jsonify({"ok": False, "error": "Device not found"}), 404
+
+    try:
+        mfg_values = _mfg_values_for_device(device)
+        commands = provisioning.build_provisioning_commands(
+            mfg_values, DemoConfig.SIDEWALK_PROVISIONING_MAX_FRAGMENT_BYTES
+        )
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": f"Device has no AWS provisioning artifacts yet: {exc}"}), 400
+    except ProvisioningError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        LOGGER.exception("Failed to build provisioning script for device %s", device_id)
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    return jsonify(
+        {
+            "ok": True,
+            "commands": commands,
+            "valueCount": len(mfg_values),
+            "terminalEvent": {
+                "prefix": "EVT:",
+                "type": "provdone",
+                "typeField": "t",
+                "successField": "ok",
+                "errorField": "err",
+            },
+            "progressEvent": {"prefix": "EVT:", "type": "provwr", "typeField": "t", "idField": "id"},
+        }
+    )
+
+
+@app.post("/admin/devices/<int:device_id>/certificate-json")
+@admin_required
+def upload_certificate_json(device_id: int):
+    """Ingest an AWS console certificate.json export for a device.
+
+    Lets an operator provision a device without the backend holding AWS
+    create-device permissions: they download certificate.json from the ACS
+    console themselves and hand it to this endpoint instead.
+    """
+    device = store.get_device(device_id)
+    if device is None:
+        return jsonify({"ok": False, "error": "Device not found"}), 404
+
+    uploaded = request.files.get("certificate_json")
+    if uploaded is None or not uploaded.filename:
+        return jsonify({"ok": False, "error": "Choose a certificate.json file to upload"}), 400
+
+    try:
+        data = json.loads(uploaded.read())
+        provisioning.validate_certificate_json(data)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return jsonify({"ok": False, "error": "That file is not valid JSON"}), 400
+    except ProvisioningError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    store.update_device_artifacts(
+        device_id,
+        wireless_device_json=provisioning.wireless_device_json_from_certificate_json(data),
+        device_profile_json=provisioning.device_profile_json_from_certificate_json(data),
+        provisioning_json=data,
+    )
+    updated = store.get_device(device_id)
+    return jsonify({"ok": True, "device": _device_summary(updated)})
+
+
+@app.post("/api/devices/<int:device_id>/provisioning-status")
+@login_required
+def record_device_provisioning_status(device_id: int):
+    """Record a provisioning outcome from the wizard: attempted/succeeded/verified/failed."""
+    user = current_user()
+    assert user is not None
+    if not _can_provision_firmware(user):
+        return jsonify({"ok": False, "error": "Not authorized to provision devices"}), 403
+
+    device = store.get_device_for_user(user, device_id)
+    if device is None:
+        return jsonify({"ok": False, "error": "Device not found"}), 404
+
+    body = request.get_json(silent=True) or {}
+    status = str(body.get("status") or "").strip().lower()
+    if status not in PROVISIONING_STATUSES:
+        return jsonify(
+            {"ok": False, "error": f"status must be one of {', '.join(sorted(PROVISIONING_STATUSES))}"}
+        ), 400
+    reason = str(body.get("reason") or "").strip()[:500] or None
+
+    store.record_provisioning_event(device_id, status=status, reason=reason, user_id=user["id"])
+    updated = store.get_device(device_id)
+    return jsonify({"ok": True, "device": _device_summary(updated)})
+
+
+@app.get("/admin/devices/<int:device_id>/provisioning-events")
+@admin_required
+def device_provisioning_events(device_id: int):
+    device = store.get_device(device_id)
+    if device is None:
+        return jsonify({"ok": False, "error": "Device not found"}), 404
+    events_list = store.list_provisioning_events(device_id)
+    return jsonify({"ok": True, "count": len(events_list), "events": events_list})
+
+
+@app.get("/api/devices/<int:device_id>/memfault-health")
+@login_required
+def device_memfault_health(device_id: int):
+    """Memfault health for one device the caller owns, or a "not configured" state."""
+    user = current_user()
+    assert user is not None
+
+    device = store.get_device_for_user(user, device_id)
+    if device is None:
+        return jsonify({"ok": False, "error": "Device not found"}), 404
+
+    health = memfault_service.device_health(device)
+    return jsonify({"ok": True, "health": health})
+
+
+@app.get("/api/admin/memfault/chunks")
+@admin_required
+def admin_memfault_chunks():
+    """Recent chunk-forwarding status, for debugging the Memfault pipeline."""
+    try:
+        limit = int(request.args.get("limit", "50"))
+    except ValueError:
+        limit = 50
+    wireless_device_id = request.args.get("device", "").strip() or None
+
+    chunks = store.list_recent_memfault_chunks(limit=limit, wireless_device_id=wireless_device_id)
+    return jsonify({"ok": True, "count": len(chunks), "chunks": chunks})
+
+
+@app.post("/api/admin/memfault/test-connectivity")
+@admin_required
+def admin_memfault_test_connectivity():
+    """Probe Memfault's org API and report a clear pass/fail with the HTTP status."""
+    result = memfault_service.test_connectivity()
+    return jsonify(result)
+
+
 @app.get("/admin")
 @admin_required
 def admin():
@@ -612,7 +838,7 @@ def create_device():
             description=description,
             destination_name=destination_name,
             location_destination_name=(
-                app.config["SIDEWALK_LOCATION_DESTINATION_NAME"] or destination_name
+                DemoConfig.SIDEWALK_LOCATION_DESTINATION_NAME or destination_name
             ),
             device_profile_id=device_profile_id,
         )
@@ -846,6 +1072,58 @@ def events():
     return Response(stream(), mimetype="text/event-stream", headers=headers)
 
 
+def _parse_ble_evt_line(text: str) -> dict | None:
+    """Parse an EVT:{...} line from the NUS shell, or None if it is not one."""
+    if not text.startswith("EVT:"):
+        return None
+    try:
+        parsed = json.loads(text[len("EVT:"):])
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _record_provisioning_outcome_from_ble_line(device: dict | None, text: str, user_id: int) -> None:
+    """Update provisioning state from the firmware's own status lines.
+
+    The BLE NUS provisioning flow reports progress and outcome asynchronously
+    on the shell rather than as a direct API call, so this reuses the
+    existing BLE log ingest instead of a second channel.
+
+    - EVT:{"t":"provwr","id":<value_id>,"ok":<bool>} is per-value progress,
+      already visible via the message log/live stream; it does not change
+      provisioning_status on its own.
+    - EVT:{"t":"provdone","ok":<bool>,"err":"..."} is the terminal outcome of
+      one provisioning attempt: succeeded or failed.
+    - EVT:{"t":"prov","provisioned":<bool>,"smsn":"...","mfg_ver":<uint>} is
+      emitted at boot and on BLE connect. A True value independently confirms
+      the device considers itself provisioned (e.g. after the post-provision
+      reboot), so it is recorded as "verified". A False value just means the
+      device is blank; that is not a failure, so it is left alone.
+    """
+    if device is None:
+        return
+    parsed = _parse_ble_evt_line(text)
+    if not parsed:
+        return
+
+    evt_type = parsed.get("t")
+    if evt_type == "provdone":
+        status = "succeeded" if parsed.get("ok") else "failed"
+        reason = str(parsed.get("err") or "")[:500] or None
+    elif evt_type == "prov" and parsed.get("provisioned"):
+        smsn = str(parsed.get("smsn") or "")[:64]
+        status = "verified"
+        reason = f"Confirmed provisioned by device at boot (smsn={smsn})" if smsn else "Confirmed provisioned by device at boot"
+    else:
+        return
+
+    try:
+        store.record_provisioning_event(device["id"], status=status, reason=reason, user_id=user_id)
+    except Exception:
+        LOGGER.warning("Failed to record a provisioning outcome from a BLE log line", exc_info=True)
+
+
 @app.post("/api/ble-log")
 @login_required
 def ble_log():
@@ -853,7 +1131,8 @@ def ble_log():
 
     Only the browser holding the BLE link can see this traffic, so it is posted
     here to reach the admin message log. Lines are stored, never broadcast to
-    other dashboards.
+    other dashboards. This is also how the BLE NUS provisioning flow reports
+    its outcome: see _record_provisioning_outcome_from_ble_line.
     """
     user = current_user()
     assert user is not None
@@ -907,6 +1186,8 @@ def ble_log():
                 "detail": text,
             }
         )
+
+        _record_provisioning_outcome_from_ble_line(device, text, user["id"])
 
     return jsonify({"ok": True, "stored": len(lines)})
 

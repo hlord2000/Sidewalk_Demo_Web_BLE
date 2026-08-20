@@ -3307,3 +3307,111 @@ dialog,
   background: transparent;
   padding: 0;
 }
+
+/* --- Provisioning wizard: step indicator and progress bar ---------------- */
+.wizard-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  margin: 0 0 1.3rem;
+  padding: 0;
+  list-style: none;
+  border: var(--edge);
+}
+
+.wizard-step {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  border-right: var(--edge-soft);
+  background: var(--panel);
+  color: var(--ink-soft);
+  font-family: var(--sans-bold);
+  font-weight: 700;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wizard-step:last-child {
+  border-right: 0;
+}
+
+.wizard-step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: 0 0 auto;
+  border: var(--edge-soft);
+  color: var(--ink-soft);
+  font-family: var(--mono);
+}
+
+.wizard-step--active {
+  background: var(--accent-strong);
+  color: #fff;
+}
+
+.wizard-step--active .wizard-step-index {
+  border-color: #fff;
+  color: #fff;
+}
+
+.wizard-step--done {
+  color: var(--ink);
+}
+
+.wizard-step--done .wizard-step-index {
+  border-color: var(--success);
+  background: var(--success);
+  color: #fff;
+}
+
+.wizard-progress-bar {
+  height: 0.9rem;
+  border: var(--edge);
+  background: var(--bg-soft);
+}
+
+.wizard-progress-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 160ms ease;
+}
+
+.wizard-status {
+  margin: 0.2rem 0 0;
+  font-family: var(--sans-regular);
+  font-size: 0.9rem;
+}
+
+.wizard-status:empty {
+  display: none;
+}
+
+.wizard-status[data-state="working"] {
+  color: var(--accent-deep);
+}
+
+.wizard-status[data-state="success"] {
+  color: var(--success);
+}
+
+.wizard-status[data-state="error"] {
+  color: var(--warn);
+}
+
+@media (max-width: 760px) {
+  .wizard-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wizard-step {
+    border-right: 0;
+    border-bottom: var(--edge-soft);
+  }
+}

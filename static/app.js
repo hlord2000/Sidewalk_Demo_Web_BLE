@@ -1825,6 +1825,13 @@ let bleLogInFlight = false;
 let bleLogDeviceId = null;
 let bleLogBleName = "";
 
+// The provisioning wizard already knows which AWS device a blank board is
+// destined for before the board can self-report a matching identity, so it
+// sets attribution explicitly instead of waiting on bindConnectedIdentity.
+function setBleLogDeviceId(deviceId) {
+  bleLogDeviceId = deviceId;
+}
+
 function queueBleLogText(text) {
   bleLogBuffer += text;
 
@@ -2017,6 +2024,14 @@ function handleDeviceEvent(event) {
     return;
   }
 
+  if (window.SidewalkProvisioning) {
+    window.SidewalkProvisioning.ingestEvent(event);
+  }
+
+  if (window.SidewalkHealth) {
+    window.SidewalkHealth.ingestBleEvent(event);
+  }
+
   switch (event.t) {
     case "identity":
       bindConnectedIdentity(event).catch((error) => {
@@ -2160,8 +2175,15 @@ function ingestSensorEvent(event) {
   }
 }
 
+function ingestHealthEvent(event) {
+  if (window.SidewalkHealth) {
+    window.SidewalkHealth.ingestStreamEvent(event);
+  }
+}
+
 function renderEvent(event) {
   ingestSensorEvent(event);
+  ingestHealthEvent(event);
 
   // The log shows device messages only. Cloud-bridge status chatter — connecting,
   // subscribed, listener up, and its failure counterparts — never appears here.
@@ -2614,6 +2636,9 @@ async function connectBleShell(
     }
     flushBleLog();
     resetBleShellState();
+    if (window.SidewalkProvisioning) {
+      window.SidewalkProvisioning.onBleDisconnected();
+    }
     setBleStatus("Disconnected");
     appendTerminal("\n[disconnected]\n");
   });
@@ -3181,3 +3206,18 @@ restoreFlashDevicePermission().catch((error) => {
   flashLogMessage(`Probe restore failed: ${error.message || error}`);
   updateFlashUi();
 });
+
+if (window.SidewalkProvisioning) {
+  window.SidewalkProvisioning.init({
+    currentDevice,
+    activateDevice,
+    connectBleShell,
+    disconnectBleShell,
+    sendBleCommand,
+    setBleLogDeviceId,
+  });
+}
+
+if (window.SidewalkHealth) {
+  window.SidewalkHealth.init({ currentDevice });
+}

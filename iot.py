@@ -31,6 +31,10 @@ LOGGER = logging.getLogger(__name__)
 MESSAGE_TYPE_NOTIFY = "CUSTOM_COMMAND_ID_NOTIFY"
 PLACEHOLDER_PREFIX = "REPLACE_"
 
+# Tag byte firmware prefixes onto a Memfault SDK packetizer chunk before
+# sending it as a Sidewalk uplink. See _memfault_chunk_from_payload.
+MEMFAULT_CHUNK_TAG = 0xC0
+
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -44,6 +48,19 @@ def _is_hex_ascii(text: str) -> bool:
     if not text or (len(text) % 2) != 0:
         return False
     return all(ch in "0123456789abcdefABCDEF" for ch in text)
+
+
+def _memfault_chunk_from_payload(raw_bytes: bytes) -> tuple[int, bytes] | None:
+    """Detect a Memfault chunk uplink on the RAW decoded payload bytes.
+
+    Wire format: byte 0 is the 0xC0 tag, byte 1 is a wrapping sequence number
+    (diagnostics only), the rest is the Memfault chunk to forward verbatim.
+    Must run before any printable-ASCII/hex heuristics in
+    _decode_nested_payload, which would otherwise mangle a binary chunk.
+    """
+    if len(raw_bytes) < 2 or raw_bytes[0] != MEMFAULT_CHUNK_TAG:
+        return None
+    return raw_bytes[1], raw_bytes[2:]
 
 
 def _decode_nested_payload(decoded_bytes: bytes) -> tuple[bytes, str, dict[str, Any] | None]:
@@ -583,8 +600,32 @@ class SidewalkCloudService:
         payload_json = None
         if payload_data:
             try:
-                decoded_bytes = base64.b64decode(payload_data)
-                decoded_bytes, decoded_text, payload_json = _decode_nested_payload(decoded_bytes)
+                raw_bytes = base64.b64decode(payload_data)
+            except Exception:
+                LOGGER.warning("Failed to decode uplink payload", exc_info=True)
+                raw_bytes = b""
+
+            chunk = _memfault_chunk_from_payload(raw_bytes)
+            if chunk is not None:
+                sequence, chunk_bytes = chunk
+                sidewalk_meta = message.get("WirelessMetadata", {}).get("Sidewalk", {})
+                self._broker.publish(
+                    {
+                        "type": "memfault_chunk",
+                        "topic": topic,
+                        "wireless_device_id": message.get("WirelessDeviceId"),
+                        "link_name": _link_name(sidewalk_meta.get("LinkType")),
+                        "memfault_sequence": sequence,
+                        "memfault_chunk_hex": chunk_bytes.hex(),
+                        "memfault_chunk_len": len(chunk_bytes),
+                        "payload_hex": chunk_bytes.hex(),
+                        "detail": f"Memfault chunk seq {sequence} ({len(chunk_bytes)} bytes)",
+                    }
+                )
+                return
+
+            try:
+                decoded_bytes, decoded_text, payload_json = _decode_nested_payload(raw_bytes)
             except Exception:
                 LOGGER.warning("Failed to decode uplink payload", exc_info=True)
 
