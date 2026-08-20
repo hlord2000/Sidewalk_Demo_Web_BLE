@@ -3209,3 +3209,27 @@ dialog,
     min-width: 0;
   }
 }
+
+/* An empty status line should take no room: these fill in only when the JS has
+   something real to say. */
+.action-status:empty,
+.location-note:empty {
+  display: none;
+  margin: 0;
+}
+
+/* Link-styled buttons (Dashboard, Admin) share the button voice. */
+.ghost-button--link {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--sans-bold);
+  font-weight: 700;
+  font-size: 0.82rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  text-decoration: none;
+}
+
+.ghost-button--link:hover {
+  text-decoration: none;
+}

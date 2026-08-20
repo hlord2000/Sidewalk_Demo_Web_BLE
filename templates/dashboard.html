@@ -7,7 +7,7 @@
 <script defer src="{{ url_for('static', filename='vendor/dap.umd.js', v='20260423webusb') }}"></script>
 <script defer src="{{ url_for('static', filename='ui.js', v='20260618loop') }}"></script>
 <script defer src="{{ url_for('static', filename='sensors.js', v='20260618tsfix') }}"></script>
-<script defer src="{{ url_for('static', filename='app.js', v='20260819sharp') }}"></script>
+<script defer src="{{ url_for('static', filename='app.js', v='20260820trim') }}"></script>
 {% endblock %}
 {% block body %}
 <main class="page-shell app-shell">
@@ -56,7 +56,6 @@
     <section class="loop-monitor">
     <div class="section-heading">
       <div>
-        <p class="eyebrow">Live telemetry</p>
         <h2>Sensor Monitor</h2>
       </div>
       <div class="section-heading-meta">
@@ -78,20 +77,13 @@
     <div id="sensor-empty" class="empty-state">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 4-6"/></svg>
       <h3>No sensor data yet</h3>
-      <p class="muted">
-        Charts appear once the selected device reports. Use Device Control to request a reading.
-      </p>
     </div>
 
     <div id="sensor-charts" class="chart-grid" hidden></div>
 
     <article class="panel panel-console loop-console">
       <div class="panel-head">
-        <span class="panel-head-inline">
-          <p class="eyebrow">BLE shell</p>
-          <h2>Nordic UART Console</h2>
-        </span>
-        <span class="muted">Raw board output over Nordic UART.</span>
+        <h2>Nordic UART Console</h2>
       </div>
       <div id="ble-terminal" class="terminal terminal-screen" aria-label="BLE shell output" role="log"></div>
       <form id="ble-command-form" class="command-row">
@@ -112,7 +104,6 @@
       <details class="log-disclosure" open>
         <summary>
           <span class="panel-head-inline">
-            <span class="eyebrow">Server stream</span>
             <h2>Raw Uplink Log</h2>
           </span>
           <span id="event-feed-status" class="live-badge live-badge--connecting">Connecting</span>
@@ -125,7 +116,6 @@
 
     <article class="panel loop-control">
       <div class="panel-head">
-        <p class="eyebrow">Local link</p>
         <h2>Device Control</h2>
       </div>
 
@@ -195,7 +185,7 @@
 
         <div class="control-actions">
           <div>
-            <p class="control-label">Send a test message</p>
+            <p class="control-label">Test message</p>
             <div class="inline-actions inline-actions--triple">
               <button type="button" class="js-link-workflow" data-workflow="ble" title="sid flow send ble">BLE</button>
               <button type="button" class="js-link-workflow" data-workflow="fsk" title="sid flow send fsk">FSK</button>
@@ -203,7 +193,7 @@
             </div>
           </div>
           <div>
-            <p class="control-label">Request data from the device</p>
+            <p class="control-label">Request data</p>
             <div class="inline-actions inline-actions--triple">
               <button type="button" class="js-shell-command ghost-button" data-command="sid flow sensor ble" data-label="Read sensors" title="sid flow sensor ble">Sensors</button>
               <button type="button" class="js-shell-command ghost-button" data-command="sid flow power ble" data-label="Read battery" title="sid flow power ble">Battery</button>
@@ -211,25 +201,14 @@
             </div>
           </div>
           <div class="location-control">
-            <div class="location-control-head">
-              <div>
-                <p class="control-label">Sidewalk Location through AWS IoT</p>
-                <p class="muted location-note">
-                  The XIAO reports nearby Sidewalk gateway data. AWS IoT resolves it
-                  and returns the board's approximate location here.
-                </p>
-              </div>
-            </div>
             <div class="inline-actions inline-actions--location">
               <button type="button" class="js-location-action" data-location-action="locate">
                 Locate through AWS Sidewalk
               </button>
             </div>
-            <p id="location-status" class="muted action-status" aria-live="polite">
-              Connect to the WebShell to request an AWS Sidewalk location.
-            </p>
+            <p id="location-status" class="muted action-status" aria-live="polite"></p>
           </div>
-          <p id="ble-workflow-status" class="muted action-status">Connect to send commands.</p>
+          <p id="ble-workflow-status" class="muted action-status"></p>
         </div>
 
         <details class="console-secondary">
@@ -315,9 +294,7 @@
   <section class="tabpanel" data-tab-panel="flash" role="tabpanel" hidden>
     <article class="panel panel-wide panel-flash">
       <div class="panel-head">
-        <p class="eyebrow">Probe over USB</p>
         <h2>WebUSB Flash</h2>
-        <p class="muted">Select the CMSIS-DAP probe in a Chromium browser, pick a bundled image or your own <code>.hex</code>, and flash over WebUSB.</p>
       </div>
       <div class="stack flash-stack">
         <div class="inline-fields flash-source-grid">
@@ -368,9 +345,7 @@
   <section class="tabpanel" data-tab-panel="downlink" role="tabpanel" hidden>
     <article class="panel panel-wide panel-downlink">
       <div class="panel-head">
-        <p class="eyebrow">Cloud to device</p>
         <h2>Cloud Downlink</h2>
-        <p class="muted">Send a payload to the selected device.</p>
       </div>
       {% if not page_config.selectedDeviceId %}
       <pre id="downlink-status" class="status-box">No device is assigned to this account yet.</pre>

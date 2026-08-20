@@ -68,7 +68,7 @@ const deviceBySmsn = new Map();
 const deviceByFingerprint = new Map();
 const firmwareImages = config.firmwareImages || [];
 const firmwareImageMap = new Map(firmwareImages.map((image) => [image.id, image]));
-const DEFAULT_BLE_WORKFLOW_STATUS = "Connect to send commands.";
+const DEFAULT_BLE_WORKFLOW_STATUS = "";
 const BLE_DEVICE_MATCH_LABEL = "Nordic UART or Sidewalk BLE service";
 const DEFAULT_NUS_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const DEFAULT_NUS_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
@@ -1944,7 +1944,7 @@ function resetBleShellState() {
   };
   setBleShellControlsDisabled(true);
   setBleWorkflowStatus(DEFAULT_BLE_WORKFLOW_STATUS);
-  setLocationStatus("Connect to the WebShell to request an AWS Sidewalk location.");
+  setLocationStatus("");
   updateConnectedDeviceUi();
   setConnState(false);
   renderLinkStatus();
@@ -2706,7 +2706,7 @@ async function connectBleShell(
           ? `Unverified board — shell commands go to ${bleDevice.name || "this board"}, the dashboard still shows ${dashboardDevice.name}.`
           : "Unverified board — it did not report a Sidewalk identity assigned to this account.",
       );
-      setLocationStatus("Verify the board's Sidewalk identity before requesting a location.");
+      setLocationStatus("Board unverified.");
       appendTerminal(
         `[warning] ${bleDevice.name || "This board"} did not report a Sidewalk identity assigned to this account; the session is unverified.\n`,
       );
@@ -2727,7 +2727,7 @@ async function connectBleShell(
     setBleWorkflowStatus(
       `Verified ${bleDevice.name || "WebShell"} as ${identifiedDevice.name}.`,
     );
-    setLocationStatus("Ready to request an AWS Sidewalk location.");
+    setLocationStatus("Ready.");
     appendTerminal(
       `[verified AWS device ${identifiedDevice.name} · ${identifiedDevice.wirelessDeviceId}]\n`,
     );

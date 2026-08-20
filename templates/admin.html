@@ -57,9 +57,7 @@
   <section class="tabpanel" data-tab-panel="customers" role="tabpanel">
     <div class="admin-toolbar">
       <div>
-        <p class="eyebrow">Accounts</p>
         <h2>Customers <span class="toolbar-count">{{ customers|length }}</span></h2>
-        <p class="muted">Each customer only sees the devices assigned to them.</p>
       </div>
       <button type="button" class="add-button" data-open-modal="modal-add-customer">
         <span class="add-glyph">+</span> Add customer
@@ -97,7 +95,6 @@
     <div class="empty-state">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/></svg>
       <h3>No customers yet</h3>
-      <p class="muted">Add a customer to give them access to assigned devices.</p>
       <button type="button" class="add-button" data-open-modal="modal-add-customer"><span class="add-glyph">+</span> Add customer</button>
     </div>
     {% endif %}
@@ -107,9 +104,7 @@
   <section class="tabpanel" data-tab-panel="devices" role="tabpanel" hidden>
     <div class="admin-toolbar">
       <div>
-        <p class="eyebrow">Inventory</p>
         <h2>Devices <span class="toolbar-count">{{ devices|length }}</span></h2>
-        <p class="muted">Register devices, assign them to customers, and download provisioning files.</p>
       </div>
       <div class="toolbar-actions">
         <button type="button" class="add-button" data-open-modal="modal-create-device"><span class="add-glyph">+</span> Create device</button>
@@ -193,7 +188,6 @@
     <div class="empty-state">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="12" rx="2"/><path d="M9 20h6"/><path d="M12 16v4"/></svg>
       <h3>No devices tracked yet</h3>
-      <p class="muted">Create a device in AWS IoT Core for Amazon Sidewalk, or import one that already exists.</p>
       <div class="inline-actions">
         <button type="button" class="add-button" data-open-modal="modal-create-device"><span class="add-glyph">+</span> Create device</button>
         <button type="button" class="ghost-button" data-open-modal="modal-import-device">Import existing</button>
@@ -206,9 +200,7 @@
   <section class="tabpanel" data-tab-panel="messages" role="tabpanel" hidden>
     <div class="admin-toolbar">
       <div>
-        <p class="eyebrow">Traffic</p>
         <h2>Messages <span class="toolbar-count" id="admin-message-count">0</span></h2>
-        <p class="muted">Every Sidewalk message and every raw BLE shell line, with the device it came from.</p>
       </div>
     </div>
 
@@ -261,7 +253,6 @@
     <form method="post" action="{{ url_for('create_customer') }}" class="modal-card">
       <div class="modal-head">
         <div>
-          <p class="eyebrow">New account</p>
           <h2>Add Customer</h2>
         </div>
         <button type="button" class="icon-button" data-close-modal aria-label="Close">&times;</button>
@@ -299,7 +290,6 @@
     <form method="post" action="{{ url_for('create_device') }}" class="modal-card">
       <div class="modal-head">
         <div>
-          <p class="eyebrow">Provisioning</p>
           <h2>Create AWS Sidewalk Device</h2>
         </div>
         <button type="button" class="icon-button" data-close-modal aria-label="Close">&times;</button>
@@ -355,7 +345,6 @@
     <form method="post" action="{{ url_for('import_device') }}" class="modal-card">
       <div class="modal-head">
         <div>
-          <p class="eyebrow">Inventory</p>
           <h2>Import Existing Device</h2>
         </div>
         <button type="button" class="icon-button" data-close-modal aria-label="Close">&times;</button>
