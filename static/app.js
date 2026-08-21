@@ -276,6 +276,8 @@ const FLASH_WRITE_CONFIG = (FLASH_WRITE_BUFFER_LINES << 8) | 0x1;
 const FLASH_SMALL_SEGMENT_COMMIT_BYTES = 4096;
 const FLASH_MAX_LOG_LINES = 240;
 const BLE_STATUS_PATTERN = /Link status:\s*\{BLE:\s*(Up|Down),\s*FSK:\s*(Up|Down),\s*LoRa:\s*(Up|Down)\}/g;
+const DEFAULT_BLE_TEST_PAYLOAD = "Hello from Web BLE";
+
 const BLE_WORKFLOWS = {
   ble: {
     flowTarget: "ble",
@@ -2336,16 +2338,18 @@ function normalizeHexPayload(value) {
 }
 
 function buildBleSendCommand(options = {}) {
-  const payload = blePayloadInput ? blePayloadInput.value : "";
+  // The payload field lives in the advanced drawer, which the console no longer
+  // renders, so fall back to a canned text message when it is absent or blank.
+  const payload = blePayloadInput && blePayloadInput.value.trim()
+    ? blePayloadInput.value
+    : "";
   const encoding = blePayloadEncodingInput ? blePayloadEncodingInput.value : "text";
 
-  if (!payload.trim()) {
-    throw new Error("Payload is empty");
-  }
-
-  const hexPayload = encoding === "hex"
-    ? normalizeHexPayload(payload)
-    : bytesToHex(textEncoder.encode(payload));
+  const hexPayload = payload
+    ? (encoding === "hex"
+      ? normalizeHexPayload(payload)
+      : bytesToHex(textEncoder.encode(payload)))
+    : bytesToHex(textEncoder.encode(options.defaultPayload ?? DEFAULT_BLE_TEST_PAYLOAD));
 
   const sendLink = options.linkOverride ?? (bleSendLinkInput ? bleSendLinkInput.value : "8");
   const linkMode = bleLinkModeInput ? bleLinkModeInput.value : "1";
