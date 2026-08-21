@@ -291,10 +291,53 @@ class MemfaultService:
 
         return result
 
+    def test_project_key(self) -> dict[str, Any]:
+        """Check the project key against the chunks endpoint without ingesting data.
+
+        Posts an empty body. Memfault checks the Memfault-Project-Key header
+        before it validates the body, so a good key answers 411 (Content-Length
+        must be positive) and a bad one answers 403. That makes this a probe
+        that proves the credential without pushing junk chunks into the project.
+        """
+        if not self._config.MEMFAULT_PROJECT_KEY:
+            return {"ok": False, "error": "MEMFAULT_PROJECT_KEY is not set"}
+
+        url = f"{self._config.MEMFAULT_CHUNKS_BASE_URL.rstrip('/')}/api/v0/chunks/connectivity-probe"
+        try:
+            response = requests.post(
+                url,
+                headers={
+                    "Memfault-Project-Key": self._config.MEMFAULT_PROJECT_KEY,
+                    "Content-Type": "application/octet-stream",
+                },
+                data=b"",
+                timeout=self._config.MEMFAULT_HTTP_TIMEOUT_SECS,
+            )
+        except requests.RequestException as exc:
+            return {"ok": False, "error": str(exc)}
+
+        if response.status_code == 411:
+            return {"ok": True, "statusCode": 411, "error": None}
+        if response.status_code in (401, 403):
+            return {"ok": False, "statusCode": response.status_code,
+                    "error": "Project key rejected by Memfault"}
+        # Anything else still means the key was accepted, since auth is checked first.
+        return {"ok": response.status_code < 400, "statusCode": response.status_code,
+                "error": None if response.status_code < 400 else f"HTTP {response.status_code}"}
+
     def test_connectivity(self) -> dict[str, Any]:
-        """Admin connectivity probe: pass/fail plus the actual HTTP status."""
+        """Admin connectivity probe covering both the write and read paths."""
+        result: dict[str, Any] = {"projectKey": self.test_project_key()}
+
         if not self.read_api_configured:
-            return {"ok": False, "error": "Set MEMFAULT_ORG_AUTH_TOKEN, MEMFAULT_ORG_SLUG, and MEMFAULT_PROJECT_SLUG first"}
+            result["readApi"] = {
+                "ok": False,
+                "configured": False,
+                "error": "Set MEMFAULT_ORG_AUTH_TOKEN, MEMFAULT_ORG_SLUG, and MEMFAULT_PROJECT_SLUG to read health back",
+            }
+            # The write path is what makes the demo send data, so it decides ok.
+            result["ok"] = result["projectKey"].get("ok", False)
+            return result
 
         # Unverified against a live API: the project root is used only as a
         # lightweight authenticated probe, not a documented health check.
@@ -307,9 +350,12 @@ class MemfaultService:
         except requests.RequestException as exc:
             return {"ok": False, "error": str(exc)}
 
-        ok = response.status_code < 400
-        return {
-            "ok": ok,
+        read_ok = response.status_code < 400
+        result["readApi"] = {
+            "ok": read_ok,
+            "configured": True,
             "statusCode": response.status_code,
-            "error": None if ok else f"HTTP {response.status_code}",
+            "error": None if read_ok else f"HTTP {response.status_code}",
         }
+        result["ok"] = result["projectKey"].get("ok", False) and read_ok
+        return result
