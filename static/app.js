@@ -2785,12 +2785,24 @@ async function sendBleCommand(command) {
   }
 
   const bytes = textEncoder.encode(`${command}\n`);
-  if (bleRxCharacteristic.writeValueWithoutResponse) {
-    await bleRxCharacteristic.writeValueWithoutResponse(bytes);
-  } else if (bleRxCharacteristic.writeValueWithResponse) {
-    await bleRxCharacteristic.writeValueWithResponse(bytes);
-  } else {
-    await bleRxCharacteristic.writeValue(bytes);
+
+  // Write Without Response is capped at ATT_MTU - 3, and Web Bluetooth gives us
+  // no way to read the negotiated MTU. A provisioning "prov set" line runs to
+  // about 106 bytes, which needs MTU >= 109. Chrome usually negotiates the
+  // peripheral's 247, but a 23 byte default has been observed on this hardware
+  // from other BLE stacks, and there the whole command would be rejected.
+  // Splitting at 20 bytes is correct at any MTU; the shell reassembles on the
+  // trailing newline. Six writes for the longest command costs nothing.
+  const CHUNK = 20;
+  for (let offset = 0; offset < bytes.length; offset += CHUNK) {
+    const slice = bytes.slice(offset, offset + CHUNK);
+    if (bleRxCharacteristic.writeValueWithoutResponse) {
+      await bleRxCharacteristic.writeValueWithoutResponse(slice);
+    } else if (bleRxCharacteristic.writeValueWithResponse) {
+      await bleRxCharacteristic.writeValueWithResponse(slice);
+    } else {
+      await bleRxCharacteristic.writeValue(slice);
+    }
   }
 }
 
