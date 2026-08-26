@@ -20,6 +20,25 @@ import provisioning
 
 LOGGER = logging.getLogger(__name__)
 
+
+def _name_of(value: Any) -> str | None:
+    """Flatten a Memfault field that may be a plain string or a nested object.
+
+    hardware_version, cohort and the software version all come back as
+    {"name": ...} or {"version": ...} rather than a bare string, so rendering
+    them directly produced "[object Object]" in the dashboard.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value or None
+    if isinstance(value, dict):
+        for key in ("name", "version", "slug"):
+            found = value.get(key)
+            if isinstance(found, str) and found:
+                return found
+    return None
+
 CHUNKS_UPLOAD_SUCCESS_STATUS = 202
 
 
@@ -247,10 +266,10 @@ class MemfaultService:
     def _fetch_device_health(self, device_serial: str) -> dict[str, Any]:
         result: dict[str, Any] = {}
 
-        # Unverified against a live API: response shape assumed from
-        # Memfault's public device-detail endpoint docs. Raw shape is logged
-        # at debug level so field mapping can be corrected once real
-        # credentials exist.
+        # Field mapping confirmed against a live project. The device detail
+        # response nests hardware_version as an object and reports the software
+        # version under last_seen_software_version, which stays null until an
+        # event carrying software info has been processed.
         try:
             response = requests.get(
                 f"{self._api_base()}/devices/{device_serial}",
@@ -263,10 +282,13 @@ class MemfaultService:
                 data = body.get("data") if isinstance(body, dict) else None
                 if not isinstance(data, dict):
                     data = body if isinstance(body, dict) else {}
-                release = data.get("current_release")
                 result["lastSeen"] = data.get("last_seen") or data.get("updated_date")
-                result["softwareVersion"] = release.get("version") if isinstance(release, dict) else None
-                result["hardwareVersion"] = data.get("hardware_version")
+                result["firstSeen"] = data.get("first_seen")
+                result["softwareVersion"] = _name_of(data.get("last_seen_software_version"))
+                result["hardwareVersion"] = _name_of(data.get("hardware_version"))
+                result["cohort"] = _name_of(data.get("cohort"))
+                nickname = data.get("nickname")
+                result["nickname"] = nickname or None
             else:
                 result["error"] = f"HTTP {response.status_code}"
         except requests.RequestException as exc:
