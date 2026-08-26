@@ -141,6 +141,31 @@
     return nodes;
   }
 
+  /*
+   * A Sidewalk SMSN is 64 hex characters and overflows a stat tile, spilling
+   * into the neighbouring one. Show head and tail so it is still recognisable
+   * at a glance, and keep the full value in the tooltip and a data attribute
+   * for anyone who needs to copy it.
+   */
+  function shortenId(value, keep) {
+    const head = keep || 8;
+    if (typeof value !== "string" || value.length <= head * 2 + 1) return value;
+    return `${value.slice(0, head)}…${value.slice(-head)}`;
+  }
+
+  function setIdTile(node, value) {
+    if (!node) return;
+    if (!value) {
+      setTile(node, "—");
+      node.value.removeAttribute("title");
+      node.value.removeAttribute("data-full");
+      return;
+    }
+    setTile(node, shortenId(value));
+    node.value.setAttribute("title", value);
+    node.value.setAttribute("data-full", value);
+  }
+
   function setTile(node, text, boolState) {
     if (!node) return;
     node.value.textContent = text;
@@ -219,7 +244,7 @@
       on: health.forwardingEnabled === true,
       off: health.forwardingEnabled === false,
     });
-    setTile(pipelineTiles.serial, health.deviceSerial || "—");
+    setIdTile(pipelineTiles.serial, health.deviceSerial);
 
     const failing = health.lastForwardOk === false;
     setTile(pipelineTiles.failures, failing ? health.lastForwardError || "Forwarding failed" : "None", {

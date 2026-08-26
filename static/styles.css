@@ -3415,3 +3415,13 @@ dialog,
     border-bottom: var(--edge-soft);
   }
 }
+
+/* Long opaque identifiers (a 64 character Sidewalk SMSN) must not spill out of
+   a stat tile into its neighbour. health.js shortens the text; this keeps any
+   remaining overflow contained rather than overlapping. */
+.stat-tile .stat-value {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
