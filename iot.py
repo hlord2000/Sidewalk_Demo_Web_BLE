@@ -57,7 +57,21 @@ def _memfault_chunk_from_payload(raw_bytes: bytes) -> tuple[int, bytes] | None:
     (diagnostics only), the rest is the Memfault chunk to forward verbatim.
     Must run before any printable-ASCII/hex heuristics in
     _decode_nested_payload, which would otherwise mangle a binary chunk.
+
+    Real Sidewalk uplinks arrive double-encoded: the payload is an ASCII hex
+    string of the bytes the firmware sent, so a chunk shows up as the text
+    "c005..." rather than the bytes 0xC0 0x05. Unwrap that first, otherwise the
+    tag check compares against ASCII 'c' (0x63) and never matches. Synthetic
+    test messages that carry raw bytes still work, so both forms are accepted.
     """
+    if len(raw_bytes) >= 4 and _is_printable_ascii(raw_bytes):
+        text = raw_bytes.decode("ascii", errors="ignore")
+        if _is_hex_ascii(text):
+            try:
+                raw_bytes = bytes.fromhex(text)
+            except ValueError:
+                pass
+
     if len(raw_bytes) < 2 or raw_bytes[0] != MEMFAULT_CHUNK_TAG:
         return None
     return raw_bytes[1], raw_bytes[2:]
