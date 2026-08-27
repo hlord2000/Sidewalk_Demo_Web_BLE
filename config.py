@@ -68,6 +68,14 @@ class DemoConfig:
         "REPLACE_SIDEWALK_WIRELESS_DEVICE_ID",
     )
     SIDEWALK_DOWNLINK_ACK_RETRY_SECS = _int_env("SIDEWALK_DOWNLINK_ACK_RETRY_SECS", 10)
+    # The sensor monitoring firmware will not start sending telemetry until the
+    # cloud answers its capability discovery notification: app_rx.c raises
+    # APP_EVENT_CAPABILITY_SUCCESS only on that response, and app_tx.c's state
+    # machine needs it to leave STATE_APP_NOTIFY_CAPABILITY. Without a
+    # responder the device resends capability forever and the sensor monitor
+    # stays empty, so answer it here. Set false to watch the raw retry
+    # behaviour instead.
+    SIDEWALK_AUTO_CAPABILITY_RESPONSE = _bool_env("SIDEWALK_AUTO_CAPABILITY_RESPONSE", True)
     SIDEWALK_MFG_STORAGE_ADDRESS = _auto_int_env("SIDEWALK_MFG_STORAGE_ADDRESS", 0x162000)
     # Raw bytes per "prov set" fragment, before base64 expansion, for the BLE
     # NUS provisioning command script. The largest single credential value is

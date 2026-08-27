@@ -1409,5 +1409,21 @@ def healthz():
     return jsonify({"ok": True})
 
 
+# Subscribe to the uplink topics already in the database at startup. Without
+# this the MQTT listener only ever starts from the device import/create routes,
+# so a restarted service silently ingests nothing until someone happens to add
+# a device again. Failures here must not stop the app from serving: a bad AWS
+# endpoint or an unreachable broker should degrade to "no uplinks", not to a
+# process that will not boot.
+def _sync_topics_at_startup() -> None:
+    try:
+        _sync_topics()
+    except Exception:
+        LOGGER.warning("Could not subscribe to uplink topics at startup", exc_info=True)
+
+
+_sync_topics_at_startup()
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8000")), debug=False)

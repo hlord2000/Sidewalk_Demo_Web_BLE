@@ -3425,3 +3425,14 @@ dialog,
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
+
+/* --- Memfault Analytics -------------------------------------------------- */
+/* This panel's tiles hold identifiers (serial, hardware and software version)
+   rather than short readings. At the 1.9rem stat size the nowrap + ellipsis
+   rule above cuts off the end, which is exactly the part that identifies the
+   build: "0.0.1+a0344c" rendered as "0.0.1+a034…". Drop the size here so they
+   fit whole; the numeric tiles in this panel are short enough to still read
+   as figures. */
+.loop-memfault .stat-value {
+  font-size: 1.2rem;
+}

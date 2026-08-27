@@ -16,6 +16,8 @@
      bat_mv    battery voltage  millivolts      -> V    (/1000)
      ibat_ua   battery current  microamps       -> mA   (/1000)
      bat_pct   battery level    percent         -> %
+     caps      sensor capability bitmask (1 temp, 2 humidity, 4 accel, 8 battery);
+               absent means the device did not report one, 0 means none available
      vbus      USB present      bool
      chg       charger status   int
      err       charger error    int
@@ -323,6 +325,20 @@
     "bat_pct",
     "vbus",
     "wake",
+    "caps",
+  ];
+
+  // Capability bits, matching the firmware's telemetry "caps" field.
+  const CAP_TEMPERATURE = 1;
+  const CAP_HUMIDITY = 2;
+  const CAP_ACCEL = 4;
+  const CAP_BATTERY = 8;
+
+  const CAP_LABELS = [
+    [CAP_TEMPERATURE, "temperature"],
+    [CAP_HUMIDITY, "humidity"],
+    [CAP_ACCEL, "accelerometer"],
+    [CAP_BATTERY, "battery"],
   ];
 
   function emptySample(t) {
@@ -340,6 +356,8 @@
       err: null,
       source: null,
       linkName: null,
+      caps: null,
+      hasReadings: false,
     };
   }
 
@@ -390,6 +408,8 @@
       if (typeof pj.wake === "boolean") sample.wake = pj.wake;
       sample.chg = num(pj.chg);
       sample.err = num(pj.err);
+      const caps = num(pj.caps);
+      if (caps != null && caps >= 0) sample.caps = caps >>> 0;
     } else if (event.payload_hex) {
       const decoded = decodeSidDemo(event.payload_hex);
       if (decoded && decoded.temperatureC != null) {
@@ -402,7 +422,9 @@
       sample.source = sample.source || "button";
     }
 
-    return hasAny(sample) ? sample : null;
+    sample.hasReadings = hasAny(sample);
+    // A frame carrying only capabilities has no readings but still counts.
+    return sample.hasReadings || sample.caps != null ? sample : null;
   }
 
   // Best-effort decode of the binary sid_demo message (TLV body).
@@ -529,6 +551,7 @@
   const CHART_DEFS = [
     {
       id: "temperature",
+      cap: CAP_TEMPERATURE,
       title: "Temperature",
       unit: "°C",
       decimals: 1,
@@ -537,6 +560,7 @@
     },
     {
       id: "humidity",
+      cap: CAP_HUMIDITY,
       title: "Relative Humidity",
       unit: "%",
       decimals: 1,
@@ -547,6 +571,7 @@
     },
     {
       id: "battery",
+      cap: CAP_BATTERY,
       title: "Battery Level",
       unit: "%",
       decimals: 0,
@@ -557,6 +582,7 @@
     },
     {
       id: "voltage",
+      cap: CAP_BATTERY,
       title: "Battery Voltage",
       unit: "V",
       decimals: 2,
@@ -565,6 +591,7 @@
     },
     {
       id: "accel",
+      cap: CAP_ACCEL,
       title: "Acceleration",
       unit: "m/s²",
       decimals: 2,
@@ -580,6 +607,7 @@
     },
     {
       id: "current",
+      cap: CAP_BATTERY,
       title: "Battery Current",
       unit: "mA",
       decimals: 1,
@@ -589,12 +617,13 @@
   ];
 
   const STAT_DEFS = [
-    { id: "temperature", label: "Temperature", unit: "°C", decimals: 1, get: (s) => s.temperature },
-    { id: "humidity", label: "Humidity", unit: "%", decimals: 1, get: (s) => s.humidity },
-    { id: "battery", label: "Battery", unit: "%", decimals: 0, get: (s) => s.batteryPct },
-    { id: "voltage", label: "Voltage", unit: "V", decimals: 2, get: (s) => s.batteryV },
-    { id: "motion", label: "Motion", kind: "bool", on: "Active", off: "Idle", get: (s) => s.wake },
-    { id: "usb", label: "USB Power", kind: "bool", on: "Present", off: "Absent", get: (s) => s.vbus },
+    { id: "temperature", cap: CAP_TEMPERATURE, label: "Temperature", unit: "°C", decimals: 1, get: (s) => s.temperature },
+    { id: "humidity", cap: CAP_HUMIDITY, label: "Humidity", unit: "%", decimals: 1, get: (s) => s.humidity },
+    { id: "battery", cap: CAP_BATTERY, label: "Battery", unit: "%", decimals: 0, get: (s) => s.batteryPct },
+    { id: "voltage", cap: CAP_BATTERY, label: "Voltage", unit: "V", decimals: 2, get: (s) => s.batteryV },
+    // wake and vbus both come off the PMIC, so they follow the battery capability.
+    { id: "motion", cap: CAP_BATTERY, label: "Motion", kind: "bool", on: "Active", off: "Idle", get: (s) => s.wake },
+    { id: "usb", cap: CAP_BATTERY, label: "USB Power", kind: "bool", on: "Present", off: "Absent", get: (s) => s.vbus },
   ];
 
   // -------------------------------------------------------------------------
@@ -604,9 +633,11 @@
     charts: new Map(),
     statNodes: new Map(),
     chartLatestNodes: new Map(),
+    chartCards: new Map(),
     els: {},
     hasData: false,
     lastSampleTs: 0,
+    caps: null,
     _demoTimer: null,
 
     init(opts) {
@@ -618,6 +649,7 @@
         sourceChip: opts.sourceChip || null,
       };
 
+      this._ensureCapNote();
       if (this.els.stats) {
         this._buildStats();
       }
@@ -637,6 +669,50 @@
       } catch (err) {
         return false;
       }
+    },
+
+    _ensureCapNote() {
+      const anchor = this.els.stats || this.els.charts;
+      if (!anchor || !anchor.parentNode) {
+        return;
+      }
+      const note = el("p", "muted");
+      note.hidden = true;
+      anchor.parentNode.insertBefore(note, anchor);
+      this.els.capNote = note;
+    },
+
+    // Hide the cards for sensors this board does not have, so a temperature-only
+    // device shows one live chart instead of one live chart and four blank ones.
+    _applyCaps(caps) {
+      this.caps = caps;
+      const known = caps != null;
+      for (const def of CHART_DEFS) {
+        const card = this.chartCards.get(def.id);
+        if (card && def.cap) {
+          card.hidden = known && !(caps & def.cap);
+        }
+      }
+      for (const def of STAT_DEFS) {
+        const node = this.statNodes.get(def.id);
+        if (node && def.cap) {
+          node.tile.hidden = known && !(caps & def.cap);
+        }
+      }
+      const note = this.els.capNote;
+      if (!note) {
+        return;
+      }
+      if (!known) {
+        note.textContent = "";
+        note.hidden = true;
+        return;
+      }
+      const names = CAP_LABELS.filter(([bit]) => caps & bit).map(([, name]) => name);
+      note.textContent = names.length
+        ? `Device reports ${names.join(", ")}.`
+        : "Device reports no sensors.";
+      note.hidden = false;
     },
 
     _buildStats() {
@@ -690,6 +766,7 @@
         card.appendChild(wrap);
 
         this.els.charts.appendChild(card);
+        this.chartCards.set(def.id, card);
 
         this.charts.set(
           def.id,
@@ -710,7 +787,11 @@
         return;
       }
 
-      const updatesLatest = sample.t >= this.lastSampleTs;
+      if (sample.caps != null && sample.caps !== this.caps) {
+        this._applyCaps(sample.caps);
+      }
+
+      const updatesLatest = sample.hasReadings && sample.t >= this.lastSampleTs;
 
       for (const def of CHART_DEFS) {
         const values = def.get(sample);
@@ -760,7 +841,7 @@
         }
       }
 
-      if (!this.hasData) {
+      if (!this.hasData && sample.hasReadings) {
         this.hasData = true;
         this._applyEmptyState();
       }
@@ -800,6 +881,7 @@
       if (this.els.sourceChip) {
         this.els.sourceChip.textContent = "Awaiting data";
       }
+      this._applyCaps(null);
       this._applyEmptyState();
     },
 
@@ -845,6 +927,7 @@
           wake: !!wake,
           chg: 1,
           err: 0,
+          caps: CAP_TEMPERATURE | CAP_HUMIDITY | CAP_ACCEL | CAP_BATTERY,
         },
       });
       const step = (wake) => {

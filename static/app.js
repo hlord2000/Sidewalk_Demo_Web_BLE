@@ -2179,6 +2179,9 @@ function ingestHealthEvent(event) {
   if (window.SidewalkHealth) {
     window.SidewalkHealth.ingestStreamEvent(event);
   }
+  if (window.SidewalkMemfault) {
+    window.SidewalkMemfault.ingestStreamEvent(event);
+  }
 }
 
 function renderEvent(event) {
@@ -3232,4 +3235,8 @@ if (window.SidewalkProvisioning) {
 
 if (window.SidewalkHealth) {
   window.SidewalkHealth.init({ currentDevice });
+}
+
+if (window.SidewalkMemfault) {
+  window.SidewalkMemfault.init({ currentDevice });
 }

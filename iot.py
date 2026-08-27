@@ -164,6 +164,51 @@ def _location_event(message: Any, topic: str) -> dict[str, Any] | None:
     }
 
 
+# sid_demo message descriptor, one byte: bit7 status-header-present,
+# bits6-5 opcode, bits4-3 command class, bits2-0 command id.
+# See sid_demo_types.h (enum sid_demo_msg_desc_attributes) for the offsets.
+_SID_DEMO_OPC_NOTIFY = 0x2
+_SID_DEMO_OPC_RESP = 0x3
+_SID_DEMO_APP_CLASS = 0x0
+_SID_DEMO_CMD_CAP_DISCOVERY = 0x0
+
+
+def _sid_demo_header(status_hdr: bool, opc: int, cmd_class: int, cmd_id: int) -> int:
+    return (int(status_hdr) << 7) | ((opc & 0x3) << 5) | ((cmd_class & 0x3) << 3) | (cmd_id & 0x7)
+
+
+# What the firmware waits for: a RESP to capability discovery, carrying a status
+# header of SID_ERROR_NONE and no payload (app_rx.c checks all three).
+SID_DEMO_CAPABILITY_RESPONSE = bytes(
+    [_sid_demo_header(True, _SID_DEMO_OPC_RESP, _SID_DEMO_APP_CLASS, _SID_DEMO_CMD_CAP_DISCOVERY), 0x00]
+)
+
+
+def _is_capability_discovery_notify(demo_bytes: bytes) -> bool:
+    """True for the capability discovery notification the device resends until answered."""
+    if not demo_bytes:
+        return False
+    header = demo_bytes[0]
+    return header == _sid_demo_header(
+        False, _SID_DEMO_OPC_NOTIFY, _SID_DEMO_APP_CLASS, _SID_DEMO_CMD_CAP_DISCOVERY
+    )
+
+
+def _sid_demo_bytes_from_uplink(decoded_bytes: bytes, decoded_text: str) -> bytes:
+    """Recover the binary sid_demo message from an uplink.
+
+    Sidewalk delivers these payloads as ASCII hex rather than raw bytes (the
+    same double encoding the Memfault chunk path has to undo), so prefer
+    decoding the text when it looks like hex and fall back to the raw bytes.
+    """
+    if decoded_text and _is_hex_ascii(decoded_text):
+        try:
+            return bytes.fromhex(decoded_text)
+        except ValueError:
+            pass
+    return decoded_bytes
+
+
 def _get_signing_value(items: list[dict[str, Any]], alg: str) -> str:
     for item in items or []:
         if item.get("SigningAlg") == alg:
@@ -212,6 +257,10 @@ class DownlinkRequest:
     message_type: str = MESSAGE_TYPE_NOTIFY
     acked: bool = True
     seq: int | None = None
+    # Set for payloads that are not text. The sid_demo protocol is binary and
+    # its capability response starts with 0xE0, which is not valid UTF-8 on its
+    # own, so encoding `text` would corrupt it.
+    payload: bytes | None = None
 
 
 class EventBroker:
@@ -378,7 +427,7 @@ class SidewalkCloudService:
     def send_downlink(self, request: DownlinkRequest) -> dict[str, Any]:
         if boto3 is None:
             raise RuntimeError("boto3 is not installed")
-        if not request.text:
+        if not request.text and not request.payload:
             raise ValueError("Downlink payload cannot be empty")
         if self._has_placeholder_aws_credentials():
             raise RuntimeError("Set AWS credentials before sending downlinks")
@@ -386,7 +435,8 @@ class SidewalkCloudService:
             self._init_iotwireless_client()
 
         seq = request.seq if request.seq is not None else self._consume_seq()
-        payload_b64 = base64.b64encode(request.text.encode("utf-8")).decode("ascii")
+        raw = request.payload if request.payload is not None else request.text.encode("utf-8")
+        payload_b64 = base64.b64encode(raw).decode("ascii")
 
         response = self._iot_client.send_data_to_wireless_device(
             Id=request.wireless_device_id,
@@ -410,6 +460,7 @@ class SidewalkCloudService:
             "message_type": request.message_type,
             "acked": request.acked,
             "text": request.text,
+            "payload_hex": raw.hex(),
             "wireless_device_id": request.wireless_device_id,
             "device_name": request.device_name,
         }
@@ -664,6 +715,39 @@ class SidewalkCloudService:
             event["semantic"] = payload_json.get("event")
 
         self._broker.publish(event)
+
+        if getattr(self._config, "SIDEWALK_AUTO_CAPABILITY_RESPONSE", False):
+            self._answer_capability_discovery(
+                message.get("WirelessDeviceId"),
+                _sid_demo_bytes_from_uplink(decoded_bytes, decoded_text),
+            )
+
+    def _answer_capability_discovery(self, wireless_device_id: Any, demo_bytes: bytes) -> None:
+        """Reply to the device's capability discovery so it starts sending telemetry.
+
+        Sent unacked: if it is lost the device just resends capability and we
+        answer the next one, which is cheaper than an acked retry storm.
+        """
+        if not isinstance(wireless_device_id, str) or not wireless_device_id:
+            return
+        if not _is_capability_discovery_notify(demo_bytes):
+            return
+
+        try:
+            self.send_downlink(
+                DownlinkRequest(
+                    text="",
+                    payload=SID_DEMO_CAPABILITY_RESPONSE,
+                    wireless_device_id=wireless_device_id,
+                    device_name="",
+                    acked=False,
+                )
+            )
+        except Exception:
+            LOGGER.warning("Failed to answer capability discovery", exc_info=True)
+            return
+
+        LOGGER.info("Answered capability discovery for %s", wireless_device_id)
 
     def _consume_seq(self) -> int:
         with self._lock:

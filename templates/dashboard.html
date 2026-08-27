@@ -9,7 +9,8 @@
 <script defer src="{{ url_for('static', filename='sensors.js', v='20260618tsfix') }}"></script>
 <script defer src="{{ url_for('static', filename='provisioning.js', v='20260820wizard') }}"></script>
 <script defer src="{{ url_for('static', filename='health.js', v='20260820health') }}"></script>
-<script defer src="{{ url_for('static', filename='app.js', v='20260820health') }}"></script>
+<script defer src="{{ url_for('static', filename='memfault_analytics.js', v='20260827memfault') }}"></script>
+<script defer src="{{ url_for('static', filename='app.js', v='20260827memfault') }}"></script>
 {% endblock %}
 {% block body %}
 <main class="page-shell app-shell">
@@ -90,6 +91,38 @@
     </div>
 
     <div id="sensor-charts" class="chart-grid" hidden></div>
+
+    <article class="panel loop-memfault">
+      <div class="panel-head">
+        <h2>Memfault Analytics</h2>
+      </div>
+      <div class="section-heading">
+        <span class="pill pill--muted">From Memfault's API, not the AWS uplink stream.</span>
+        <div class="section-heading-meta">
+          <span id="memfault-status-badge" class="live-badge live-badge--connecting">Checking</span>
+        </div>
+      </div>
+
+      <div id="memfault-empty" class="empty-state">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 4-6"/></svg>
+        <h3>No Memfault data yet</h3>
+      </div>
+
+      <div id="memfault-not-configured" class="empty-state" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 4-6"/></svg>
+        <h3>Memfault is not configured</h3>
+        <p>
+          Read credentials are not set. Set <code>MEMFAULT_ORG_AUTH_TOKEN</code>, <code>MEMFAULT_ORG_SLUG</code>,
+          and <code>MEMFAULT_PROJECT_SLUG</code> to see analytics here.
+        </p>
+      </div>
+
+      <div id="memfault-error" class="error-box" hidden></div>
+
+      <div id="memfault-stats" class="stat-grid" hidden></div>
+      <p id="memfault-dashboard-link" class="muted" hidden></p>
+    </article>
+
     <article class="panel loop-log">
       <details class="log-disclosure" open>
         <summary>
