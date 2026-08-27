@@ -728,12 +728,19 @@ class DemoStore:
     # restart instead of only living in memory.
 
     # Uplinks are subscribed at MQTT QoS 1 (AT_LEAST_ONCE), which explicitly
-    # permits redelivery, and the device also retransmits. Forwarding a repeat is
-    # not harmless: a Memfault heartbeat spans two chunks -- a 0x48 opener and a
-    # 0x80 continuation -- and a duplicated continuation corrupts Memfault's
-    # server side reassembly. The message is then dropped there while every POST
-    # still returns 202, so the device goes stale with no error anywhere. Drop
-    # repeats on the way in instead.
+    # permits redelivery, and the device re-sends chunks of its own accord.
+    # Forwarding a repeat is not harmless: a Memfault heartbeat spans two chunks
+    # -- a 0x48 opener and a 0x80 continuation -- and a duplicated opener or
+    # continuation corrupts Memfault's server side reassembly. The message is
+    # then dropped there while every POST still returns 202, so the device goes
+    # stale with no error anywhere.
+    #
+    # Keyed on the chunk bytes alone, deliberately NOT on the uplink framing
+    # sequence. The device stamps a fresh sequence on every transmission, so two
+    # byte-identical chunks routinely arrive as sequence 1 and sequence 3;
+    # including the sequence in the key let every one of those through. Chunk
+    # bytes carry their own offset and CRC, so identical bytes for one device
+    # really are the same chunk.
     MEMFAULT_CHUNK_DEDUPE_WINDOW_SECS = 600
 
     def enqueue_memfault_chunk(
@@ -756,12 +763,11 @@ class DemoStore:
                 """
                 SELECT id FROM memfault_chunks
                 WHERE wireless_device_id = ?
-                  AND sequence = ?
                   AND chunk_data = ?
                   AND received_at >= ?
                 LIMIT 1
                 """,
-                (wireless_device_id, sequence, chunk_data, cutoff),
+                (wireless_device_id, chunk_data, cutoff),
             ).fetchone()
             if duplicate is not None:
                 return 0

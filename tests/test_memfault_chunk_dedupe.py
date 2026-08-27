@@ -35,6 +35,19 @@ def test_identical_chunk_is_dropped(tmp_path):
     assert second == 0, "a redelivered chunk must be dropped, not queued again"
 
 
+def test_duplicate_with_a_different_framing_sequence_is_dropped(tmp_path):
+    """The real failure: the device stamps a new sequence on every transmission.
+
+    Captured off the wire, one heartbeat opener arrived twice in the same second
+    as sequence 1 and sequence 3 with identical bytes. Keying the dedupe on the
+    sequence let both through and broke Memfault's reassembly.
+    """
+    store = _store(tmp_path)
+    opener = bytes.fromhex("4860" + "02a7020103010a6d7369646577616c6b2d64656d6f")
+    assert _enqueue(store, opener, sequence=1) > 0
+    assert _enqueue(store, opener, sequence=3) == 0
+
+
 def test_different_continuations_both_queue(tmp_path):
     """Two heartbeats produce different continuation bytes; neither may be lost."""
     store = _store(tmp_path)
