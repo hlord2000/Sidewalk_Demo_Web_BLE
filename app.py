@@ -714,6 +714,15 @@ def device_memfault_diagnostic(device_id: int):
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
 
+    # Acked by default. The device only has a link up part of the time under the
+    # multi-link manager, and an unacked downlink is sent once and dropped if
+    # nothing is listening -- which is exactly what happened the first time this
+    # was tried. Acked mode makes AWS retry for
+    # SIDEWALK_DOWNLINK_ACK_RETRY_SECS, so the request survives until the device
+    # is reachable. The device faults before it can ack, so the retry window runs
+    # to completion; keep it short or the same crash can be delivered twice.
+    acked = bool(body.get("acked", True))
+
     try:
         event = cloud_service.send_downlink(
             DownlinkRequest(
@@ -721,14 +730,21 @@ def device_memfault_diagnostic(device_id: int):
                 payload=payload,
                 wireless_device_id=device["wireless_device_id"],
                 device_name=device["name"],
-                # Unacked: the device is about to fault, so it will never ack.
-                acked=False,
+                acked=acked,
             )
         )
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
 
-    return jsonify({"ok": True, "command": command, "payloadHex": payload.hex(), "event": event})
+    return jsonify(
+        {
+            "ok": True,
+            "command": command,
+            "payloadHex": payload.hex(),
+            "acked": acked,
+            "event": event,
+        }
+    )
 
 
 @app.get("/api/admin/memfault/chunks")
