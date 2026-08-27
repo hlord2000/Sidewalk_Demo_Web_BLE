@@ -10,7 +10,7 @@
    fields read live from Memfault's own API (lastSeen, firstSeen,
    softwareVersion, hardwareVersion, cohort, nickname, recentRebootCount).
    This panel only renders the latter group — the point of the panel is that
-   it is not the AWS uplink path — plus deviceSerial/dashboardUrl for
+   it is not the AWS uplink path — plus deviceSerial for
    identification and linking out.
 
    Two non-error states are first-class: "configured: false" (no Memfault
@@ -135,7 +135,6 @@
     if (els.notConfigured) els.notConfigured.hidden = which !== "notConfigured";
     if (els.error) els.error.hidden = which !== "error";
     if (els.stats) els.stats.hidden = which !== "stats";
-    if (els.dashboardLink && which !== "stats") els.dashboardLink.hidden = true;
   }
 
   function showError(message) {
@@ -177,20 +176,6 @@
       typeof health.recentRebootCount === "number" ? String(health.recentRebootCount) : "—"
     );
 
-    if (els.dashboardLink) {
-      if (health.dashboardUrl) {
-        els.dashboardLink.replaceChildren();
-        const link = document.createElement("a");
-        link.href = health.dashboardUrl;
-        link.target = "_blank";
-        link.rel = "noreferrer";
-        link.textContent = "Open this device in Memfault";
-        els.dashboardLink.appendChild(link);
-        els.dashboardLink.hidden = false;
-      } else {
-        els.dashboardLink.hidden = true;
-      }
-    }
   }
 
   // ---- Health fetch -----------------------------------------------------
@@ -226,7 +211,6 @@
       configured: true,
       forwardingEnabled: true,
       deviceSerial: "DEMO0001SMSN",
-      dashboardUrl: "https://app.memfault.com/organizations/demo-org/projects/demo-project/devices/DEMO0001SMSN/",
       lastSeen: new Date().toISOString(),
       firstSeen: "2026-05-01T09:12:00Z",
       softwareVersion: null,
@@ -336,6 +320,49 @@
     }, QUICK_REFRESH_DEBOUNCE_MS);
   }
 
+  // Ask the device to fault on purpose. The downlink goes out over Sidewalk, the
+  // device's fault handler records why it rebooted, and the reboot event comes
+  // back over Sidewalk on the next boot, so the whole round trip is observable
+  // without touching the board.
+  async function requestDiagnostic(command) {
+    if (!deviceId) {
+      setCrashStatus("Select a device first.", "error");
+      return;
+    }
+    if (els.crashButton) els.crashButton.disabled = true;
+    setCrashStatus("Sending crash request over Sidewalk\u2026", "working");
+    try {
+      const response = await fetch(`/api/devices/${deviceId}/memfault/diagnostic`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: command || "hardfault" }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !body.ok) {
+        setCrashStatus(body.error || `Request failed (HTTP ${response.status}).`, "error");
+        return;
+      }
+      setCrashStatus(
+        `Sent ${body.command} (0x${body.payloadHex}). The device reboots, then reports the reason on its next drain.`,
+        "success"
+      );
+    } catch (err) {
+      setCrashStatus(`Request failed: ${err.message}`, "error");
+    } finally {
+      if (els.crashButton) els.crashButton.disabled = false;
+    }
+  }
+
+  function setCrashStatus(text, state) {
+    if (!els.crashStatus) return;
+    els.crashStatus.textContent = text;
+    if (state) {
+      els.crashStatus.dataset.state = state;
+    } else {
+      delete els.crashStatus.dataset.state;
+    }
+  }
+
   function init(hookOpts) {
     hooks = hookOpts || {};
 
@@ -344,7 +371,6 @@
     els.notConfigured = document.getElementById("memfault-not-configured");
     els.error = document.getElementById("memfault-error");
     els.stats = document.getElementById("memfault-stats");
-    els.dashboardLink = document.getElementById("memfault-dashboard-link");
 
     if (!els.stats) {
       // Panel markup not present on this page.
@@ -352,6 +378,14 @@
     }
 
     tiles = buildTiles(els.stats, TILE_DEFS);
+
+    els.crashButton = document.getElementById("memfault-crash-button");
+    els.crashStatus = document.getElementById("memfault-crash-status");
+    if (els.crashButton) {
+      els.crashButton.addEventListener("click", () =>
+        requestDiagnostic(els.crashButton.dataset.command)
+      );
+    }
 
     document.addEventListener("tab:activated", (event) => {
       const detail = event.detail || {};

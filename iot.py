@@ -184,6 +184,39 @@ SID_DEMO_CAPABILITY_RESPONSE = bytes(
 )
 
 
+# Diagnostic downlinks ride on sid_demo command class 1, which the demo protocol
+# never uses, so no demo message definition has to change. The whole downlink is
+# a single byte, which matters on a link whose payload budget can be 19 bytes.
+# Handled by app_rx_diag_process() in app_rx.c.
+_SID_DEMO_OPC_WRITE = 0x1
+_SID_DEMO_DIAG_CLASS = 0x1
+
+DIAG_CMD_CRASH_ASSERT = 0x0
+DIAG_CMD_CRASH_HARDFAULT = 0x1
+DIAG_CMD_REBOOT = 0x2
+
+DIAG_COMMANDS = {
+    "assert": DIAG_CMD_CRASH_ASSERT,
+    "hardfault": DIAG_CMD_CRASH_HARDFAULT,
+    "reboot": DIAG_CMD_REBOOT,
+}
+
+
+def sid_demo_diagnostic_downlink(command: str) -> bytes:
+    """One byte that tells the device to crash or reboot on purpose.
+
+    The device faults, the Memfault fault handler records the reason, and the
+    reboot event is drained over Sidewalk on the next boot.
+    """
+    try:
+        cmd_id = DIAG_COMMANDS[command]
+    except KeyError:
+        raise ValueError(
+            f"Unknown diagnostic command {command!r}; expected one of {sorted(DIAG_COMMANDS)}"
+        ) from None
+    return bytes([_sid_demo_header(False, _SID_DEMO_OPC_WRITE, _SID_DEMO_DIAG_CLASS, cmd_id)])
+
+
 def _is_capability_discovery_notify(demo_bytes: bytes) -> bool:
     """True for the capability discovery notification the device resends until answered."""
     if not demo_bytes:

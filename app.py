@@ -27,7 +27,12 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 import provisioning
 from config import DemoConfig
-from iot import DownlinkRequest, EventBroker, SidewalkCloudService
+from iot import (
+    DownlinkRequest,
+    EventBroker,
+    SidewalkCloudService,
+    sid_demo_diagnostic_downlink,
+)
 from memfault import MemfaultService
 from provisioning import ProvisioningError, build_sidewalk_mfg_bin, bytes_to_ihex, merge_ihex
 from storage import DemoStore
@@ -682,6 +687,48 @@ def device_memfault_health(device_id: int):
 
     health = memfault_service.device_health(device)
     return jsonify({"ok": True, "health": health})
+
+
+@app.post("/api/devices/<int:device_id>/memfault/diagnostic")
+@login_required
+def device_memfault_diagnostic(device_id: int):
+    """Ask the device to crash or reboot on purpose, over Sidewalk.
+
+    The one byte downlink is handled by app_rx_diag_process() in the firmware.
+    The device faults, its Memfault fault handler records the reason, and the
+    reboot event comes back over Sidewalk on the next boot, so the round trip is
+    visible in Memfault without touching the device physically.
+    """
+    user = current_user()
+    assert user is not None
+
+    device = store.get_device_for_user(user, device_id)
+    if device is None:
+        return jsonify({"ok": False, "error": "Device not found"}), 404
+
+    body = request.get_json(force=True, silent=True) or {}
+    command = (body.get("command") or "hardfault").strip().lower()
+
+    try:
+        payload = sid_demo_diagnostic_downlink(command)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    try:
+        event = cloud_service.send_downlink(
+            DownlinkRequest(
+                text="",
+                payload=payload,
+                wireless_device_id=device["wireless_device_id"],
+                device_name=device["name"],
+                # Unacked: the device is about to fault, so it will never ack.
+                acked=False,
+            )
+        )
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    return jsonify({"ok": True, "command": command, "payloadHex": payload.hex(), "event": event})
 
 
 @app.get("/api/admin/memfault/chunks")

@@ -120,7 +120,13 @@
       <div id="memfault-error" class="error-box" hidden></div>
 
       <div id="memfault-stats" class="stat-grid" hidden></div>
-      <p id="memfault-dashboard-link" class="muted" hidden></p>
+
+      <div class="inline-actions">
+        <button type="button" id="memfault-crash-button" data-command="hardfault">
+          Crash the device
+        </button>
+      </div>
+      <p id="memfault-crash-status" class="muted action-status" aria-live="polite"></p>
     </article>
 
     <article class="panel loop-log">
