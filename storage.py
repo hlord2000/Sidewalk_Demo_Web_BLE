@@ -727,6 +727,15 @@ class DemoStore:
     # POSTs each chunk to Memfault, so a queued chunk survives a process
     # restart instead of only living in memory.
 
+    # Uplinks are subscribed at MQTT QoS 1 (AT_LEAST_ONCE), which explicitly
+    # permits redelivery, and the device also retransmits. Forwarding a repeat is
+    # not harmless: a Memfault heartbeat spans two chunks -- a 0x48 opener and a
+    # 0x80 continuation -- and a duplicated continuation corrupts Memfault's
+    # server side reassembly. The message is then dropped there while every POST
+    # still returns 202, so the device goes stale with no error anywhere. Drop
+    # repeats on the way in instead.
+    MEMFAULT_CHUNK_DEDUPE_WINDOW_SECS = 600
+
     def enqueue_memfault_chunk(
         self,
         *,
@@ -736,8 +745,27 @@ class DemoStore:
         chunk_data: bytes,
         message_log_id: int | None = None,
     ) -> int:
+        """Queue a chunk for forwarding, or return 0 if it is a recent duplicate."""
         now = utc_now_iso()
+        cutoff = (
+            datetime.now(timezone.utc)
+            - timedelta(seconds=self.MEMFAULT_CHUNK_DEDUPE_WINDOW_SECS)
+        ).isoformat(timespec="seconds")
         with self.connect() as conn:
+            duplicate = conn.execute(
+                """
+                SELECT id FROM memfault_chunks
+                WHERE wireless_device_id = ?
+                  AND sequence = ?
+                  AND chunk_data = ?
+                  AND received_at >= ?
+                LIMIT 1
+                """,
+                (wireless_device_id, sequence, chunk_data, cutoff),
+            ).fetchone()
+            if duplicate is not None:
+                return 0
+
             cursor = conn.execute(
                 """
                 INSERT INTO memfault_chunks

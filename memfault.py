@@ -119,6 +119,12 @@ class MemfaultService:
             chunk_data=chunk_bytes,
             message_log_id=event.get("log_id"),
         )
+        if not chunk_id:
+            LOGGER.info(
+                "Skipping duplicate Memfault chunk seq %s for %s", sequence, wireless_device_id
+            )
+            return None
+
         self._store.upsert_memfault_device_health(
             wireless_device_id=wireless_device_id,
             device_serial=device_serial,
