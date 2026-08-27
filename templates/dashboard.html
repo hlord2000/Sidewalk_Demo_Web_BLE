@@ -7,7 +7,10 @@
 <script defer src="{{ url_for('static', filename='vendor/dap.umd.js', v='20260423webusb') }}"></script>
 <script defer src="{{ url_for('static', filename='ui.js', v='20260618loop') }}"></script>
 <script defer src="{{ url_for('static', filename='sensors.js', v='20260618tsfix') }}"></script>
-<script defer src="{{ url_for('static', filename='app.js', v='20260820consolidate') }}"></script>
+<script defer src="{{ url_for('static', filename='provisioning.js', v='20260820wizard') }}"></script>
+<script defer src="{{ url_for('static', filename='health.js', v='20260820health') }}"></script>
+<script defer src="{{ url_for('static', filename='memfault_analytics.js', v='20260827memfault') }}"></script>
+<script defer src="{{ url_for('static', filename='app.js', v='20260827memfault') }}"></script>
 {% endblock %}
 {% block body %}
 <main class="page-shell app-shell">
@@ -49,6 +52,14 @@
       <svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M5 21h14"/></svg>
       <span>Downlink</span>
     </button>
+    <button class="tab" role="tab" type="button" data-tab-target="provision" aria-selected="false">
+      <svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="M4 5.5l1 1 1.5-1.5"/><path d="M4 11.5l1 1 1.5-1.5"/><path d="M4 17.5l1 1 1.5-1.5"/></svg>
+      <span>Provision</span>
+    </button>
+    <button class="tab" role="tab" type="button" data-tab-target="health" aria-selected="false">
+      <svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2 7 4-15 3 8h5"/></svg>
+      <span>Device health</span>
+    </button>
   </nav>
 
   <!-- ================== MONITOR & CONTROL ================== -->
@@ -80,6 +91,38 @@
     </div>
 
     <div id="sensor-charts" class="chart-grid" hidden></div>
+
+    <article class="panel loop-memfault">
+      <div class="panel-head">
+        <h2>Memfault Analytics</h2>
+      </div>
+      <div class="section-heading">
+        <span class="pill pill--muted">From Memfault's API, not the AWS uplink stream.</span>
+        <div class="section-heading-meta">
+          <span id="memfault-status-badge" class="live-badge live-badge--connecting">Checking</span>
+        </div>
+      </div>
+
+      <div id="memfault-empty" class="empty-state">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 4-6"/></svg>
+        <h3>No Memfault data yet</h3>
+      </div>
+
+      <div id="memfault-not-configured" class="empty-state" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 4-6"/></svg>
+        <h3>Memfault is not configured</h3>
+        <p>
+          Read credentials are not set. Set <code>MEMFAULT_ORG_AUTH_TOKEN</code>, <code>MEMFAULT_ORG_SLUG</code>,
+          and <code>MEMFAULT_PROJECT_SLUG</code> to see analytics here.
+        </p>
+      </div>
+
+      <div id="memfault-error" class="error-box" hidden></div>
+
+      <div id="memfault-stats" class="stat-grid" hidden></div>
+      <p id="memfault-dashboard-link" class="muted" hidden></p>
+    </article>
+
     <article class="panel loop-log">
       <details class="log-disclosure" open>
         <summary>
@@ -296,9 +339,226 @@
     </article>
   </section>
 
+  <!-- ====================== PROVISION ====================== -->
+  <section class="tabpanel" data-tab-panel="provision" role="tabpanel" hidden>
+    <article class="panel panel-wide panel-provision">
+      <div class="panel-head">
+        <h2>Provision device</h2>
+      </div>
+
+      {% if not page_config.canProvisionFirmware %}
+      <p class="muted">Your account cannot provision devices. Ask an admin to enable this for your account.</p>
+      {% elif not page_config.devices %}
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 4-6"/></svg>
+        <h3>No device assigned</h3>
+        <p>An admin needs to assign an AWS Sidewalk device to this account first.</p>
+      </div>
+      {% else %}
+      <ol class="wizard-steps" id="prov-steps">
+        <li class="wizard-step" data-wizard-step="device"><span class="wizard-step-index">1</span><span>Device</span></li>
+        <li class="wizard-step" data-wizard-step="connect"><span class="wizard-step-index">2</span><span>Connect</span></li>
+        <li class="wizard-step" data-wizard-step="write"><span class="wizard-step-index">3</span><span>Write</span></li>
+        <li class="wizard-step" data-wizard-step="verify"><span class="wizard-step-index">4</span><span>Verify</span></li>
+      </ol>
+
+      <!-- Step 1: pick which AWS device's credentials to write. -->
+      <div class="stack" data-wizard-panel="device">
+        <label>
+          <span>Device</span>
+          <select id="prov-device-select">
+            {% for device in page_config.devices %}
+            <option value="{{ device.id }}">{{ device.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <dl id="prov-device-summary" class="kv-list"></dl>
+        <p id="prov-device-warning" class="muted"></p>
+        {% if page_config.user.role == 'admin' %}
+        <div class="inline-actions">
+          <button type="button" class="ghost-button" data-open-modal="modal-certificate-json">Upload certificate.json</button>
+        </div>
+        {% endif %}
+        <div class="inline-actions">
+          <button type="button" id="prov-step-device-next">Next: connect</button>
+        </div>
+      </div>
+
+      <!-- Step 2: connect over BLE and read the device's own prov status. -->
+      <div class="stack" data-wizard-panel="connect" hidden>
+        <p class="muted">Lists every nearby Bluetooth device by name, since a blank board has no AWS identity to filter on yet.</p>
+        <div class="inline-actions">
+          <button type="button" id="prov-connect">Connect</button>
+          <button type="button" id="prov-disconnect" class="ghost-button">Disconnect</button>
+        </div>
+        <p id="prov-connect-status" class="wizard-status" aria-live="polite"></p>
+        <div id="prov-detect-result" class="status-box" hidden></div>
+        <div class="inline-actions">
+          <button type="button" id="prov-step-connect-back" class="ghost-button">Back</button>
+          <button type="button" id="prov-step-connect-next" disabled>Next: write</button>
+        </div>
+      </div>
+
+      <!-- Step 3: send the provisioning script and track progress. -->
+      <div class="stack" data-wizard-panel="write" hidden>
+        <div id="prov-overwrite-warning" class="flash-box flash-box--error" hidden></div>
+        <label class="checkbox-row" id="prov-overwrite-confirm-row" hidden>
+          <input type="checkbox" id="prov-overwrite-confirm">
+          <span>Overwrite the credentials already on this device</span>
+        </label>
+        <div class="inline-actions">
+          <button type="button" id="prov-write-start">Write credentials</button>
+        </div>
+        <div id="prov-progress-wrap" hidden>
+          <div class="wizard-progress-bar"><div id="prov-progress-fill" class="wizard-progress-fill"></div></div>
+          <p id="prov-progress-label" class="muted"></p>
+        </div>
+        <p id="prov-write-status" class="wizard-status" aria-live="polite"></p>
+        <details class="log-disclosure">
+          <summary>
+            <span class="panel-head-inline">
+              <h2>Command log</h2>
+            </span>
+          </summary>
+          <div id="prov-write-log" class="event-log"></div>
+        </details>
+        <div class="inline-actions">
+          <button type="button" id="prov-step-write-back" class="ghost-button">Back</button>
+        </div>
+      </div>
+
+      <!-- Step 4: expect the reboot disconnect, then reconnect and confirm. -->
+      <div class="stack" data-wizard-panel="verify" hidden>
+        <p class="muted">Credentials only take effect after reboot. The board drops the Bluetooth link when it reboots; reconnect once it comes back. The first boot after provisioning runs a key migration, which can take a moment.</p>
+        <div class="inline-actions">
+          <button type="button" id="prov-reconnect">Reconnect</button>
+        </div>
+        <p id="prov-verify-status" class="wizard-status" aria-live="polite"></p>
+        <div id="prov-verify-result" class="status-box" hidden></div>
+        <div class="inline-actions">
+          <button type="button" id="prov-step-verify-back" class="ghost-button">Back</button>
+          <button type="button" id="prov-restart" class="ghost-button">Start over</button>
+        </div>
+      </div>
+      {% endif %}
+    </article>
+  </section>
+
+  <!-- ====================== DEVICE HEALTH ====================== -->
+  <section class="tabpanel" data-tab-panel="health" role="tabpanel" hidden>
+    {% if not page_config.selectedDeviceId %}
+    <article class="panel panel-wide panel-health">
+      <div class="panel-head">
+        <h2>Device health</h2>
+      </div>
+      <p class="muted">No device is assigned to this account yet.</p>
+    </article>
+    {% else %}
+    <article class="panel panel-wide panel-health">
+      <div class="panel-head">
+        <h2>Memfault pipeline</h2>
+      </div>
+      <div class="section-heading">
+        <div>
+          <p class="muted">Chunk forwarding status for the selected device. Backed by local state, so this works with no Memfault credentials.</p>
+        </div>
+        <div class="section-heading-meta">
+          <span id="health-pipeline-badge" class="live-badge live-badge--connecting">Checking</span>
+        </div>
+      </div>
+      <div id="health-pipeline-stats" class="stat-grid"></div>
+    </article>
+
+    <article class="panel panel-wide panel-health">
+      <div class="panel-head">
+        <h2>Device health</h2>
+      </div>
+
+      <div id="health-not-configured" class="empty-state">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 4-6"/></svg>
+        <h3>Memfault is not configured</h3>
+        <p>
+          Set <code>MEMFAULT_PROJECT_KEY</code> to forward chunks. Set <code>MEMFAULT_ORG_AUTH_TOKEN</code>,
+          <code>MEMFAULT_ORG_SLUG</code>, and <code>MEMFAULT_PROJECT_SLUG</code> to read device health back.
+          See <code>.env.example</code>.
+        </p>
+      </div>
+
+      <div id="health-device-error" class="error-box" hidden></div>
+
+      <div id="health-device-stats" class="stat-grid" hidden></div>
+      <div id="health-trend" class="chart-grid" hidden></div>
+      <p id="health-dashboard-link" class="muted" hidden></p>
+    </article>
+
+    {% if page_config.adminUrl %}
+    <article class="panel panel-wide panel-health">
+      <div class="panel-head">
+        <h2>Admin diagnostics</h2>
+      </div>
+      <div class="inline-actions">
+        <button type="button" id="health-test-connectivity">Test connectivity</button>
+        <button type="button" id="health-chunks-refresh" class="ghost-button">Refresh chunk log</button>
+      </div>
+      <p id="health-connectivity-status" class="wizard-status" aria-live="polite"></p>
+      <details class="log-disclosure">
+        <summary>
+          <span class="panel-head-inline">
+            <h2>Chunk forwarding log</h2>
+          </span>
+          <span id="health-chunks-count" class="pill pill--muted">0 chunks</span>
+        </summary>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Received</th>
+                <th>Device</th>
+                <th>Seq</th>
+                <th>Bytes</th>
+                <th>Status</th>
+                <th>Attempts</th>
+                <th>Last error</th>
+              </tr>
+            </thead>
+            <tbody id="health-chunks-rows"></tbody>
+          </table>
+        </div>
+        <p id="health-chunks-empty" class="table-empty">No chunks recorded yet.</p>
+      </details>
+    </article>
+    {% endif %}
+    {% endif %}
+  </section>
+
   <footer class="nordic-footer">
     <span>Nordic Semiconductor</span>
     <span>Sidewalk Demo</span>
   </footer>
+
+  {% if page_config.canProvisionFirmware and page_config.devices and page_config.user.role == 'admin' %}
+  <dialog id="modal-certificate-json" class="modal">
+    <form id="prov-certificate-form" class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h2>Upload certificate.json</h2>
+        </div>
+        <button type="button" class="icon-button" data-close-modal aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body stack">
+        <p class="muted modal-note">AWS IoT Wireless console export for the device selected in the Provision tab.</p>
+        <label>
+          <span>certificate.json</span>
+          <input type="file" id="prov-certificate-file" accept="application/json,.json" required>
+        </label>
+        <p id="prov-certificate-status" class="wizard-status" aria-live="polite"></p>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="ghost-button" data-close-modal>Cancel</button>
+        <button type="submit" id="prov-certificate-submit">Upload</button>
+      </div>
+    </form>
+  </dialog>
+  {% endif %}
 </main>
 {% endblock %}

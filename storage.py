@@ -4,7 +4,7 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -121,6 +121,47 @@ class DemoStore:
 
                 CREATE INDEX IF NOT EXISTS idx_messages_wid_id
                     ON messages (wireless_device_id, id);
+
+                CREATE TABLE IF NOT EXISTS memfault_chunks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    wireless_device_id TEXT NOT NULL,
+                    device_serial TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    chunk_data BLOB NOT NULL,
+                    received_at TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'sent', 'failed')),
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    last_attempt_at TEXT,
+                    last_error TEXT,
+                    next_attempt_at TEXT NOT NULL,
+                    message_log_id INTEGER REFERENCES messages(id) ON DELETE SET NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_memfault_chunks_due
+                    ON memfault_chunks (status, next_attempt_at);
+                CREATE INDEX IF NOT EXISTS idx_memfault_chunks_wid_id
+                    ON memfault_chunks (wireless_device_id, id);
+
+                CREATE TABLE IF NOT EXISTS memfault_device_health (
+                    wireless_device_id TEXT PRIMARY KEY,
+                    device_serial TEXT NOT NULL,
+                    last_chunk_at TEXT,
+                    last_forward_ok INTEGER,
+                    last_forward_error TEXT,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS device_provisioning_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+                    status TEXT NOT NULL CHECK(status IN ('attempted', 'succeeded', 'verified', 'failed')),
+                    reason TEXT,
+                    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_device_provisioning_events_device_id
+                    ON device_provisioning_events (device_id, id);
                 """
             )
             conn.execute(
@@ -136,6 +177,10 @@ class DemoStore:
             )
             self._ensure_column(conn, "users", "can_provision", "INTEGER NOT NULL DEFAULT 0")
             conn.execute("UPDATE users SET can_provision = 1 WHERE role = 'admin'")
+            self._ensure_column(conn, "devices", "provisioning_status", "TEXT")
+            self._ensure_column(conn, "devices", "provisioning_status_at", "TEXT")
+            self._ensure_column(conn, "devices", "provisioning_status_reason", "TEXT")
+            self._ensure_column(conn, "devices", "provisioning_status_by_user_id", "INTEGER")
 
     def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
         columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
@@ -521,6 +566,21 @@ class DemoStore:
             ).fetchone()
             return dict(row) if row else None
 
+    def device_by_wireless_id_full(self, wireless_device_id: str) -> dict[str, Any] | None:
+        """Full device row (decoded artifact JSON included) by wireless device id.
+
+        Used by the Memfault forwarder to resolve a device serial without
+        going through the request-scoped, user-authorized lookups.
+        """
+        if not wireless_device_id:
+            return None
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM devices WHERE wireless_device_id = ?",
+                (wireless_device_id,),
+            ).fetchone()
+            return self._decode_device_row(row) if row else None
+
     def get_device_for_user(self, user: dict[str, Any], device_id: int) -> dict[str, Any] | None:
         device = self.get_device(device_id)
         if device is None:
@@ -659,3 +719,229 @@ class DemoStore:
         customer_ids = item.get("customer_ids")
         item["customer_ids"] = [int(value) for value in customer_ids.split(",")] if customer_ids else []
         return item
+
+    # -- Memfault chunk queue ------------------------------------------------
+    #
+    # A chunk is written here the moment it is detected on the MQTT listener
+    # thread. A single background worker in memfault.py drains this table and
+    # POSTs each chunk to Memfault, so a queued chunk survives a process
+    # restart instead of only living in memory.
+
+    def enqueue_memfault_chunk(
+        self,
+        *,
+        wireless_device_id: str,
+        device_serial: str,
+        sequence: int,
+        chunk_data: bytes,
+        message_log_id: int | None = None,
+    ) -> int:
+        now = utc_now_iso()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO memfault_chunks
+                    (wireless_device_id, device_serial, sequence, chunk_data, received_at,
+                     status, attempts, next_attempt_at, message_log_id)
+                VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?)
+                """,
+                (wireless_device_id, device_serial, sequence, chunk_data, now, now, message_log_id),
+            )
+            return int(cursor.lastrowid)
+
+    def next_memfault_chunk_to_send(self) -> dict[str, Any] | None:
+        """The oldest chunk due for a forwarding attempt, if any.
+
+        Due means pending and either never attempted or past its backoff.
+        """
+        now = utc_now_iso()
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM memfault_chunks
+                WHERE status = 'pending' AND next_attempt_at <= ?
+                ORDER BY id
+                LIMIT 1
+                """,
+                (now,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def mark_memfault_chunk_sent(self, chunk_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE memfault_chunks
+                SET status = 'sent', last_attempt_at = ?, last_error = NULL
+                WHERE id = ?
+                """,
+                (utc_now_iso(), chunk_id),
+            )
+
+    def mark_memfault_chunk_attempt_failed(
+        self,
+        chunk_id: int,
+        *,
+        attempts: int,
+        error: str | None,
+        terminal: bool,
+        backoff_secs: int,
+    ) -> None:
+        """Record a failed forwarding attempt.
+
+        ``terminal`` moves the chunk to the 'failed' end state instead of
+        rescheduling it, once the attempt cap in memfault.py is reached.
+        """
+        now = datetime.now(timezone.utc)
+        next_attempt_at = (now + timedelta(seconds=max(0, backoff_secs))).isoformat(timespec="seconds")
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE memfault_chunks
+                SET status = ?, attempts = ?, last_attempt_at = ?, last_error = ?, next_attempt_at = ?
+                WHERE id = ?
+                """,
+                (
+                    "failed" if terminal else "pending",
+                    attempts,
+                    now.isoformat(timespec="seconds"),
+                    (error or "")[:500] or None,
+                    next_attempt_at,
+                    chunk_id,
+                ),
+            )
+
+    def list_recent_memfault_chunks(
+        self,
+        limit: int = 50,
+        wireless_device_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Chunk forwarding status, newest first, for the admin debug view.
+
+        Excludes the raw chunk bytes; callers get chunk_len instead.
+        """
+        clauses = []
+        params: list[Any] = []
+        if wireless_device_id:
+            clauses.append("wireless_device_id = ?")
+            params.append(wireless_device_id)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(max(1, min(limit, 500)))
+
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT id, wireless_device_id, device_serial, sequence,
+                       LENGTH(chunk_data) AS chunk_len, received_at, status,
+                       attempts, last_attempt_at, last_error, next_attempt_at,
+                       message_log_id
+                FROM memfault_chunks
+                {where}
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def upsert_memfault_device_health(
+        self,
+        *,
+        wireless_device_id: str,
+        device_serial: str,
+        last_chunk_at: str | None = None,
+        last_forward_ok: bool | None = None,
+        last_forward_error: str | None = None,
+    ) -> None:
+        """Cache per-device forwarding state, leaving unset fields untouched."""
+        now = utc_now_iso()
+        has_forward_result = last_forward_ok is not None
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO memfault_device_health
+                    (wireless_device_id, device_serial, last_chunk_at, last_forward_ok, last_forward_error, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(wireless_device_id) DO UPDATE SET
+                    device_serial = excluded.device_serial,
+                    last_chunk_at = COALESCE(excluded.last_chunk_at, memfault_device_health.last_chunk_at),
+                    last_forward_ok = CASE WHEN ? THEN excluded.last_forward_ok ELSE memfault_device_health.last_forward_ok END,
+                    last_forward_error = CASE WHEN ? THEN excluded.last_forward_error ELSE memfault_device_health.last_forward_error END,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    wireless_device_id,
+                    device_serial,
+                    last_chunk_at,
+                    int(last_forward_ok) if has_forward_result else None,
+                    last_forward_error,
+                    now,
+                    has_forward_result,
+                    has_forward_result,
+                ),
+            )
+
+    def get_memfault_device_health(self, wireless_device_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM memfault_device_health WHERE wireless_device_id = ?",
+                (wireless_device_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        item["last_forward_ok"] = bool(item["last_forward_ok"]) if item["last_forward_ok"] is not None else None
+        return item
+
+    # -- Provisioning outcomes ------------------------------------------------
+
+    def record_provisioning_event(
+        self,
+        device_id: int,
+        *,
+        status: str,
+        reason: str | None,
+        user_id: int | None,
+    ) -> int:
+        """Append one provisioning outcome and mirror it onto the device row.
+
+        The event table is the audit trail; the mirrored columns on devices
+        let the dashboard show the latest state without a second query.
+        """
+        now = utc_now_iso()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO device_provisioning_events (device_id, status, reason, user_id, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (device_id, status, reason or None, user_id, now),
+            )
+            conn.execute(
+                """
+                UPDATE devices
+                SET provisioning_status = ?,
+                    provisioning_status_at = ?,
+                    provisioning_status_reason = ?,
+                    provisioning_status_by_user_id = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (status, now, reason or None, user_id, now, device_id),
+            )
+            return int(cursor.lastrowid)
+
+    def list_provisioning_events(self, device_id: int, limit: int = 50) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT e.*, u.email AS user_email
+                FROM device_provisioning_events e
+                LEFT JOIN users u ON u.id = e.user_id
+                WHERE e.device_id = ?
+                ORDER BY e.id DESC
+                LIMIT ?
+                """,
+                (device_id, max(1, min(limit, 500))),
+            ).fetchall()
+            return [dict(row) for row in rows]
