@@ -3436,3 +3436,21 @@ dialog,
 .loop-memfault .stat-value {
   font-size: 1.2rem;
 }
+
+/* Keep Memfault's source/status row, data tiles and action visibly separated. */
+.loop-memfault > .section-heading {
+  align-items: center;
+  margin-bottom: 1rem;
+}
+.loop-memfault > .inline-actions {
+  margin-top: 1rem;
+}
+.loop-memfault > .inline-actions > button {
+  flex: 0 1 auto;
+  width: auto;
+}
+.loop-memfault .stat-value {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.loop-memfault > .action-status:empty { display: none; }
