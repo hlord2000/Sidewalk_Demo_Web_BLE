@@ -113,6 +113,9 @@
       opener.addEventListener("click", () => {
         const dialog = document.getElementById(opener.dataset.openModal);
         if (dialog && typeof dialog.showModal === "function") {
+          // Touch browsers do not always focus a clicked button. Establish the
+          // return target before showModal records the previous focus.
+          opener.focus({ preventScroll: true });
           dialog.showModal();
         }
       });

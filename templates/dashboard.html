@@ -1,11 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Sidewalk Device Console{% endblock %}
 {% block head %}
+<script defer src="{{ url_for('static', filename='devkit-guide.js', v='20260908flare') }}"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='devkit-guide.css', v='20260908flare') }}">
 <script>
   window.DEMO_CONFIG = {{ page_config | tojson }};
 </script>
 <script defer src="{{ url_for('static', filename='vendor/dap.umd.js', v='20260423webusb') }}"></script>
-<script defer src="{{ url_for('static', filename='ui.js', v='20260618loop') }}"></script>
+<script defer src="{{ url_for('static', filename='ui.js', v='20260908guide') }}"></script>
 <script defer src="{{ url_for('static', filename='sensors.js', v='20260618tsfix') }}"></script>
 <script defer src="{{ url_for('static', filename='provisioning.js', v='20260820wizard') }}"></script>
 <script defer src="{{ url_for('static', filename='health.js', v='20260820health') }}"></script>
@@ -566,5 +568,6 @@
     </form>
   </dialog>
   {% endif %}
+  {% include '_devkit_guide.html' %}
 </main>
 {% endblock %}

@@ -1,0 +1,44 @@
+<button class="devkit-guide-launch" type="button" data-open-modal="modal-devkit-guide" aria-haspopup="dialog" aria-controls="modal-devkit-guide">
+  <span aria-hidden="true">+</span> Devkit guide
+</button>
+
+<dialog id="modal-devkit-guide" class="devkit-guide" aria-labelledby="devkit-guide-title">
+  <article class="devkit-guide-card">
+    <header class="devkit-guide-head">
+      <div>
+        <h2 id="devkit-guide-title">Sidewalk Devkit: nRF54L15 + nPM1300 + SX1262</h2>
+      </div>
+      <button type="button" class="icon-button" data-close-modal aria-label="Close devkit guide" autofocus>&times;</button>
+    </header>
+    <div class="devkit-guide-body">
+      <figure class="devkit-guide-board">
+        <div class="devkit-guide-render">
+        <img src="{{ url_for('static', filename='assets/devkit-top.webp') }}" width="1400" height="1000" alt="Flat overhead render of the Sidewalk devkit, showing the nRF54L15, nPM1300 power section, radio, buttons and connectors." loading="lazy">
+          <span class="devkit-led-flare" data-led-flare="charging" style="--led-x:30.604%;--led-y:29.849%;--led-rgb:255,55,45" aria-hidden="true"></span>
+          <span class="devkit-led-flare" data-led-flare="network" style="--led-x:30.604%;--led-y:33.243%;--led-rgb:40,255,105" aria-hidden="true"></span>
+          <span class="devkit-led-flare" data-led-flare="bluetooth" style="--led-x:30.604%;--led-y:36.637%;--led-rgb:35,150,255" aria-hidden="true"></span>
+          <span class="devkit-led-flare" data-led-flare="motion" style="--led-x:57.498%;--led-y:53.394%;--led-rgb:35,150,255" aria-hidden="true"></span>
+        </div>
+        <figcaption>nRF54L15 + nPM1300 · Sidewalk devkit</figcaption>
+      </figure>
+      <div class="devkit-guide-copy">
+        <section class="devkit-guide-section">
+          <span class="devkit-guide-index" aria-hidden="true">01</span>
+          <div><h3>Ship mode</h3><p>The onboard nPM1300 uses “shipmode” to protect the battery from discharge when not in use. To wake the device, just press the top button labelled “BTN”. To enter ship mode, hold BTN for 5 seconds until blue flashes three times, then release.</p></div>
+        </section>
+        <section class="devkit-guide-section">
+          <span class="devkit-guide-index" aria-hidden="true">02</span>
+          <div>
+            <h3>LEDs</h3>
+            <dl class="devkit-guide-leds">
+              <div data-led-row="charging"><dt><button type="button" class="devkit-led-control" data-led-target="charging" aria-pressed="false"><span class="devkit-guide-dot devkit-guide-dot--red" aria-hidden="true"></span>Red - Charging</button></dt><dd>Blinks every 10 seconds while charging.</dd></div>
+              <div data-led-row="network"><dt><button type="button" class="devkit-led-control" data-led-target="network" aria-pressed="false"><span class="devkit-guide-dot devkit-guide-dot--green" aria-hidden="true"></span>Green - Network Activity</button></dt><dd>Blinks once when a packet is sent and twice when a packet is received over Sidewalk.</dd></div>
+              <div data-led-row="bluetooth"><dt><button type="button" class="devkit-led-control" data-led-target="bluetooth" aria-pressed="false"><span class="devkit-guide-dot devkit-guide-dot--blue" aria-hidden="true"></span>Blue - Local Bluetooth Activity</button></dt><dd>Breathes when waiting for shell connection. After connection, blinks once for sent messages and twice for received messages.</dd></div>
+              <div data-led-row="motion"><dt><button type="button" class="devkit-led-control" data-led-target="motion" aria-pressed="false"><span class="devkit-guide-dot devkit-guide-dot--blue" aria-hidden="true"></span>nRF54L15 Blue LED</button></dt><dd>Blinks when the accelerometer detects movement. If this LED blinks when you shake the DK, it’s working!</dd></div>
+            </dl>
+          </div>
+        </section>
+      </div>
+    </div>
+  </article>
+</dialog>

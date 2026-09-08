@@ -1,0 +1,129 @@
+.devkit-guide-launch {
+  position: fixed;
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  right: max(1rem, env(safe-area-inset-right));
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .8rem 1.1rem;
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  background: var(--ink);
+  color: #fff;
+  box-shadow: 4px 4px 0 var(--accent);
+}
+.devkit-guide-launch span { color: var(--accent); font-size: 1.4rem; line-height: 1; }
+.app-shell:has(.devkit-guide-launch) { padding-bottom: 6rem; }
+.devkit-guide {
+  --guide-gap: max(2rem, env(safe-area-inset-top), env(safe-area-inset-bottom));
+  inset: 0;
+  width: min(1120px, calc(100% - 2 * var(--guide-gap)));
+  max-width: none;
+  max-height: min(calc(100dvh - 2 * var(--guide-gap)), 850px);
+  margin: auto;
+  padding: 0;
+  border: 2px solid var(--ink);
+  border-top: 5px solid var(--accent);
+  border-radius: 0;
+  color: var(--ink);
+  background: var(--panel);
+  box-shadow: 0 16px 60px #0003;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.devkit-guide::backdrop { background: #18232b99; }
+body:has(.devkit-guide[open]) { overflow: hidden; }
+.devkit-guide[open] { animation: devkit-guide-in 180ms ease-out; }
+.devkit-guide-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.1rem 1.5rem;
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--panel);
+}
+.devkit-guide-head h2 { margin: .2rem 0 0; font-size: clamp(1.4rem, 3vw, 2rem); }
+.devkit-guide-head .icon-button { flex-shrink: 0; min-width: 44px; min-height: 44px; }
+.devkit-guide-body { display: grid; grid-template-columns: 1fr 1.1fr; }
+.devkit-guide-board {
+  margin: 0;
+  padding: 1.5rem;
+  background: #eaf0f2;
+  border-right: 1px solid var(--line-strong);
+}
+.devkit-guide-board img { display: block; width: 100%; height: auto; object-fit: contain; }
+.devkit-guide-board figcaption { font: .7rem var(--mono); text-align: center; margin: .75rem 0 1.5rem; }
+.devkit-guide-section { display: flex; gap: 1rem; align-items: flex-start; }
+.devkit-guide-index { flex-shrink: 0; border: 1px solid currentColor; padding: .4rem; font: .8rem var(--mono); }
+.devkit-guide-copy { padding: 1.5rem; display: grid; align-content: start; gap: 1.35rem; }
+.devkit-guide h3 { font-size: 1rem; margin: 0 0 .35rem; }
+.devkit-guide p { font-size: .88rem; line-height: 1.5; margin: 0; }
+.devkit-guide-leds { margin: .65rem 0 0; }
+.devkit-guide-leds > div { border-top: 1px solid var(--line); padding: .6rem 0; }
+.devkit-guide-leds dt { font-weight: 700; font-size: .86rem; display: flex; align-items: center; gap: .5rem; }
+.devkit-guide-leds dd { margin: .25rem 0 0 1.15rem; font-size: .82rem; line-height: 1.4; color: var(--ink-soft); }
+.devkit-guide-dot { width: .65rem; height: .65rem; border-radius: 50%; border: 1px solid #0003; }
+.devkit-guide-dot--red { background: #d44140; }
+.devkit-guide-dot--green { background: #218747; }
+.devkit-guide-dot--blue { background: #167bc1; }
+.devkit-guide-path { display: flex; flex-wrap: wrap; list-style: none; padding: 0; margin: .8rem 0 0; gap: .45rem; font: .67rem var(--mono); }
+.devkit-guide-path li:not(:last-child)::after { content: '→'; padding-left: .45rem; color: var(--accent-deep); }
+@keyframes devkit-guide-in { from { transform: translateY(2rem); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .devkit-guide[open] { animation: none; } }
+@media (max-width: 680px) {
+  .devkit-guide { --guide-gap: max(1rem, env(safe-area-inset-top), env(safe-area-inset-bottom)); }
+  .devkit-guide-body { grid-template-columns: 1fr; }
+  .devkit-guide-head { padding: 1rem; }
+  .devkit-guide-board { padding: 1rem; border-right: 0; border-bottom: 1px solid var(--line-strong); }
+  .devkit-guide-board img { max-height: 240px; }
+  .devkit-guide-board figcaption { margin-bottom: 1rem; }
+  .devkit-guide-copy { padding: 1.2rem 1rem max(1.5rem, env(safe-area-inset-bottom)); }
+}
+
+/* Coordinates are projected from the PCB into the unchanged 1400 x 1000 render. */
+.devkit-guide-render { position: relative; width: 100%; }
+.devkit-led-flare {
+  position: absolute;
+  left: var(--led-x);
+  top: var(--led-y);
+  width: 11%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(circle, #fff 0 3%, rgba(var(--led-rgb), 1) 5%, rgba(var(--led-rgb), .8) 11%, rgba(var(--led-rgb), .35) 28%, rgba(var(--led-rgb), 0) 70%);
+  transition: opacity 120ms ease;
+}
+.devkit-led-flare.is-active { opacity: 1; }
+.devkit-guide-leds .devkit-led-control {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .3rem 0;
+  min-height: 32px;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  box-shadow: none;
+  font: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+  text-align: left;
+  cursor: pointer;
+}
+.devkit-led-control:focus-visible { outline: 2px solid var(--accent-deep); outline-offset: 3px; }
+.devkit-guide-leds > .is-active { background: #00a9ce0d; }
+@media (max-width: 680px) {
+  .devkit-guide-board { position: sticky; top: var(--guide-header-height, 96px); z-index: 1; padding: .4rem 1rem; }
+  .devkit-guide-render { max-width: 252px; margin: auto; }
+  .devkit-guide-board img { max-height: none; }
+  .devkit-guide-board figcaption { margin: .2rem 0 .4rem; font-size: .6rem; }
+  .devkit-guide-leds .devkit-led-control { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) { .devkit-led-flare { transition: none; } }
