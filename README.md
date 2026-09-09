@@ -92,6 +92,17 @@ conservative defaults:
   send chunks under. `smsn` uses the Sidewalk manufacturing serial when known,
   falling back to the AWS wireless device id. `wireless_device_id` always uses
   that id.
+- `MEMFAULT_AUTO_CREATE_DEVICES` (default `true`): register each device in
+  Memfault at the moment it is created in AWS. Needs the read API variables
+  above; a project key alone is not enough.
+- `MEMFAULT_HARDWARE_VERSION` (default `sidewalk_devkit_nrf54l15`): required by
+  Memfault's create-device call, and must match the firmware's
+  `CONFIG_MEMFAULT_NCS_HW_VERSION` exactly. The default is what
+  `firmware/SidewalkDevkit-Memfault.hex` reports, so it only needs setting if
+  that overlay changes. Device registration is skipped with a warning if it is
+  ever set to an empty value.
+- `MEMFAULT_COHORT`: optional cohort slug for newly registered devices. Empty
+  leaves them in the project default cohort.
 - `MEMFAULT_HTTP_TIMEOUT_SECS` (default `10`), `MEMFAULT_CHUNK_MAX_ATTEMPTS`
   (default `8`), `MEMFAULT_CHUNK_MAX_BACKOFF_SECS` (default `300`),
   `MEMFAULT_WORKER_POLL_SECS` (default `5`): forwarding worker tuning.
@@ -163,6 +174,32 @@ with a `Memfault-Project-Key` header. Failed attempts back off exponentially
 and stop retrying after `MEMFAULT_CHUNK_MAX_ATTEMPTS`. Because the queue lives
 in SQLite, a chunk survives a process restart.
 
+### Device registration
+
+A demo device has two halves that must agree on one identifier: Sidewalk
+credentials in AWS, and a device in Memfault. Both are created by the same
+admin action. `/admin/devices/create` and `/admin/devices/import` call
+`MemfaultService.ensure_device_for()` after the local record is committed,
+which `POST`s to
+`/api/v0/organizations/<org>/projects/<project>/devices` with the device's
+SMSN as `device_serial` and `MEMFAULT_HARDWARE_VERSION` as
+`hardware_version`, then `PATCH`es the cohort and nickname when either is
+configured.
+
+That serial is the same one the chunk forwarder posts under, so the
+pre-created device and the device's own uplinks land on one Memfault device.
+The firmware agrees by construction: `CONFIG_MEMFAULT_NCS_DEVICE_ID_RUNTIME`
+plus `app_memfault.c` seed the Memfault device id from the Sidewalk SMSN as
+uppercase hex at boot, which is the same normalization
+`provisioning.normalize_smsn` applies.
+
+The call is idempotent. Memfault documents 409 as the answer for a serial it
+already knows, so this treats 200 and 409 alike. It is also non-fatal:
+Memfault would create the device implicitly on its first chunk anyway, so a
+failure here is flashed as a warning and never rolls back a wireless device
+that was just created in AWS. Set `MEMFAULT_AUTO_CREATE_DEVICES=false` to
+rely on implicit creation only.
+
 Routes:
 
 - `GET /api/devices/<id>/memfault-health`: session-authed, health for a device
@@ -232,23 +269,45 @@ single edit.
 
 The paired firmware expects:
 
-- button trigger on `P1.04`
-- LED feedback on `P2.00`
 - BLE shell over Nordic UART Service
+- the Sidewalk Devkit LED and button mapping (see `docs/devkit-guide/`)
 
-Build the XIAO variant with:
+### Bundled Firmware
+
+`firmware/SidewalkDevkit-Memfault.hex` is the image offered as
+`SidewalkDevkit-Memfault.hex` in the dashboard's WebUSB Flash picker. It is
+the only bundled image with Memfault compiled in, so the Memfault panels stay
+empty on any other image.
+
+It is built from the `ncs-sidewalk-demo-application` repo, against the
+`sidewalk_devkit_nrf54l15` board and the out-of-tree board files:
 
 ```sh
-west build -p always -b xiao_nrf54l15/nrf54l15/cpuapp app \
-  -d build/xiao-web-demo \
+source ncs-sidewalk-demo-application/tools/ncs-env.sh
+west build -p always -b sidewalk_devkit_nrf54l15/nrf54l15/cpuapp \
+  ncs-sidewalk-demo-application/app \
+  -d build/sidewalk-devkit-memfault --sysbuild \
   -- \
-  -DFILE_SUFFIX=release \
-  -DOVERLAY_CONFIG='overlay-min-size.conf;overlay-prop-radio.conf;overlay-web-demo.conf' \
-  -DDTC_OVERLAY_FILE='boards/xiao_nrf54l15_nrf54l15_cpuapp.overlay;overlay-web-demo.overlay'
+  -DZEPHYR_EXTRA_MODULES=<path to>/Sidewalk_Devkit_Board_Files \
+  -Dapp_OVERLAY_CONFIG='overlay-dut.conf;overlay-dut-nus.conf;overlay-memfault.conf'
 ```
 
-The generated image is:
+The devkit builds under sysbuild with MCUboot in direct-XIP mode, so app
+overlays need the `app_` image prefix (`-Dapp_OVERLAY_CONFIG`); a bare
+`-DOVERLAY_CONFIG` would apply to the sysbuild image instead and silently
+leave Memfault out. `overlay-memfault.conf` is merged last and deliberately
+flips the app variant from `overlay-dut.conf`'s DUT build to sensor
+monitoring, whose TX thread drains the Memfault chunks.
+
+Copy the result into `firmware/`:
 
 ```text
-build/xiao-web-demo/merged.hex
+build/sidewalk-devkit-memfault/merged.hex
 ```
+
+This build is tight on both regions, so a firmware change can start failing to
+link without any change here: 94.5% of FLASH and 96.6% of the 188 KB RAM
+region. `CONFIG_MEMFAULT_EVENT_STORAGE_SIZE` is the first thing to trade away.
+
+`firmware/AODemo2.hex` is an older XIAO nRF54L15 image kept as a fallback. It
+predates Memfault support.

@@ -53,10 +53,17 @@ BLE_LOG_MAX_LINE_CHARS = 512
 
 WEB_DEMO_ROOT = Path(__file__).resolve().parent
 FLASH_IMAGE_MANIFEST = {
-    "aodemo1": {
-        "name": "AODemo1.hex",
-        "path": WEB_DEMO_ROOT / "firmware/AODemo1.hex",
+    # Current demo image: Sidewalk Devkit board, sensor monitoring with the BLE
+    # NUS companion shell, Memfault enabled. Built from
+    # ncs-sidewalk-demo-application with overlay-dut.conf, overlay-dut-nus.conf
+    # and overlay-memfault.conf; see "Bundled Firmware" in README.md for the
+    # exact build command. This is the only bundled image that emits Memfault
+    # chunks, so the Memfault panels stay empty on any other image.
+    "devkit-memfault": {
+        "name": "SidewalkDevkit-Memfault.hex",
+        "path": WEB_DEMO_ROOT / "firmware/SidewalkDevkit-Memfault.hex",
     },
+    # Older XIAO nRF54L15 image, kept as a fallback. No Memfault support.
     "aodemo2": {
         "name": "AODemo2.hex",
         "path": WEB_DEMO_ROOT / "firmware/AODemo2.hex",
@@ -323,6 +330,55 @@ def _load_or_refresh_artifacts(device: dict) -> tuple[dict, dict, dict]:
         provisioning_json=provisioning_json,
     )
     return wireless_device_json, device_profile_json, provisioning_json
+
+
+def _register_memfault_device(
+    *,
+    wireless_device_id: str,
+    name: str,
+    wireless_device_json: dict | None,
+    provisioning_json: dict | None,
+) -> None:
+    """Register a just-created device in Memfault, without failing the create.
+
+    The Sidewalk credentials and the Memfault device are two halves of the
+    same demo device, so they are created together and keyed to the same
+    serial (the SMSN). This runs inline on the admin request: one POST, plus
+    at most one PATCH, against Memfault's org API.
+
+    A Memfault outage must never lose a wireless device that was just created
+    in AWS, so every failure here is flashed as a warning rather than raised.
+    Chunk forwarding also still creates the device implicitly on first uplink,
+    which makes this an optimization, not a prerequisite.
+    """
+    if not (DemoConfig.MEMFAULT_ENABLED and DemoConfig.MEMFAULT_AUTO_CREATE_DEVICES):
+        return
+
+    try:
+        result = memfault_service.ensure_device_for(
+            {
+                "wireless_device_id": wireless_device_id,
+                "name": name,
+                "wireless_device_json": wireless_device_json,
+                "provisioning_json": provisioning_json,
+            }
+        )
+    except Exception as exc:
+        LOGGER.exception("Failed to register %s in Memfault", wireless_device_id)
+        flash(f"Device created, but registering it in Memfault failed: {exc}", "warning")
+        return
+
+    if not result.get("ok"):
+        flash(f"Device created, but registering it in Memfault failed: {result.get('error')}", "warning")
+        return
+
+    serial = result.get("deviceSerial")
+    if result.get("existed"):
+        flash(f"Memfault device {serial} already existed.", "success")
+    else:
+        flash(f"Registered Memfault device {serial}.", "success")
+    if result.get("attributeError"):
+        flash(f"Memfault cohort/nickname was not applied: {result['attributeError']}", "warning")
 
 
 def _mfg_hex_for_device(device: dict) -> str:
@@ -877,6 +933,12 @@ def import_device():
 
     _sync_topics()
     flash(f"Imported device {name}.", "success")
+    _register_memfault_device(
+        wireless_device_id=wireless_device_id,
+        name=name,
+        wireless_device_json=wireless_device_json,
+        provisioning_json=provisioning_json,
+    )
     return redirect(url_for("admin"))
 
 
@@ -932,6 +994,12 @@ def create_device():
 
     _sync_topics()
     flash(f"Created AWS Sidewalk device {name}.", "success")
+    _register_memfault_device(
+        wireless_device_id=created["id"],
+        name=name,
+        wireless_device_json=wireless_device_json,
+        provisioning_json=provisioning_json,
+    )
     return redirect(url_for("admin"))
 
 

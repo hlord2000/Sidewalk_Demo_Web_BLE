@@ -40,6 +40,11 @@ def _name_of(value: Any) -> str | None:
     return None
 
 CHUNKS_UPLOAD_SUCCESS_STATUS = 202
+# Memfault's create-device endpoint answers 409 when the serial already
+# exists, which the docs call out as the expected way to make the call
+# idempotent: "call the create-device endpoint every time and check for either
+# a 200 - OK or a 409 - CONFLICT response".
+DEVICE_EXISTS_STATUS = 409
 
 
 class MemfaultService:
@@ -81,6 +86,111 @@ class MemfaultService:
             "https://app.memfault.com/organizations/"
             f"{self._config.MEMFAULT_ORG_SLUG}/projects/{self._config.MEMFAULT_PROJECT_SLUG}"
             f"/devices/{device_serial}/"
+        )
+
+    # -- device registration ---------------------------------------------
+
+    def ensure_device(self, device_serial: str, *, nickname: str | None = None) -> dict[str, Any]:
+        """Register one device in Memfault, idempotently.
+
+        Memfault creates a device implicitly when its first chunk arrives, but
+        that leaves dashboard_url_for_serial() pointing at a 404 until the
+        device actually transmits, and takes hardware_version and cohort from
+        whatever that first chunk happened to carry. Creating the device up
+        front, at the same moment its Sidewalk credentials are created in AWS,
+        keeps both halves of the demo keyed to the same serial from the start.
+
+        Safe to call on every device creation: the create endpoint answers 409
+        when the serial is already known, which Memfault documents as the way
+        to make this call repeatable. Never raises; callers treat a Memfault
+        outage as non-fatal to AWS device creation.
+        """
+        if not self.read_api_configured:
+            return {
+                "ok": False,
+                "configured": False,
+                "error": "Set MEMFAULT_ORG_AUTH_TOKEN, MEMFAULT_ORG_SLUG, and MEMFAULT_PROJECT_SLUG to register devices",
+            }
+        if not device_serial:
+            return {"ok": False, "configured": True, "error": "No device serial to register"}
+        hardware_version = self._config.MEMFAULT_HARDWARE_VERSION
+        if not hardware_version:
+            return {
+                "ok": False,
+                "configured": True,
+                "error": "MEMFAULT_HARDWARE_VERSION is not set; it must match the firmware's CONFIG_MEMFAULT_NCS_HW_VERSION",
+            }
+
+        try:
+            response = requests.post(
+                f"{self._api_base()}/devices",
+                headers={**self._api_headers(), "Content-Type": "application/json"},
+                json={"device_serial": device_serial, "hardware_version": hardware_version},
+                timeout=self._config.MEMFAULT_HTTP_TIMEOUT_SECS,
+            )
+        except requests.RequestException as exc:
+            return {"ok": False, "configured": True, "error": str(exc)}
+
+        existed = response.status_code == DEVICE_EXISTS_STATUS
+        if not (response.ok or existed):
+            return {
+                "ok": False,
+                "configured": True,
+                "statusCode": response.status_code,
+                "error": f"HTTP {response.status_code}: {response.text[:200]}",
+            }
+
+        result: dict[str, Any] = {
+            "ok": True,
+            "configured": True,
+            "statusCode": response.status_code,
+            "deviceSerial": device_serial,
+            "hardwareVersion": hardware_version,
+            "created": not existed,
+            "existed": existed,
+            "dashboardUrl": self.dashboard_url_for_serial(device_serial),
+            "error": None,
+        }
+
+        # cohort and nickname go in a follow-up PATCH rather than the create
+        # body: only device_serial and hardware_version are documented create
+        # fields, and a rejected create would lose the device entirely, while a
+        # rejected PATCH only loses the label.
+        attributes: dict[str, str] = {}
+        if self._config.MEMFAULT_COHORT:
+            attributes["cohort"] = self._config.MEMFAULT_COHORT
+        if nickname:
+            attributes["nickname"] = nickname
+        if attributes:
+            patch_error = self._update_device(device_serial, attributes)
+            if patch_error:
+                # The device exists, which is what the caller asked for, so this
+                # stays a success with the cosmetic failure attached.
+                result["attributeError"] = patch_error
+            else:
+                result.update(attributes)
+
+        return result
+
+    def _update_device(self, device_serial: str, attributes: dict[str, str]) -> str | None:
+        """PATCH device attributes. Returns an error string, or None on success."""
+        try:
+            response = requests.patch(
+                f"{self._api_base()}/devices/{device_serial}",
+                headers={**self._api_headers(), "Content-Type": "application/json"},
+                json=attributes,
+                timeout=self._config.MEMFAULT_HTTP_TIMEOUT_SECS,
+            )
+        except requests.RequestException as exc:
+            return str(exc)
+        if not response.ok:
+            return f"HTTP {response.status_code}: {response.text[:200]}"
+        return None
+
+    def ensure_device_for(self, device: dict[str, Any]) -> dict[str, Any]:
+        """ensure_device() for a stored device row, using its demo-side serial."""
+        return self.ensure_device(
+            self.device_serial_for(device), nickname=device.get("name") or None
         )
 
     # -- ingest: called synchronously from a broker hook -----------------

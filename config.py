@@ -118,6 +118,22 @@ class DemoConfig:
     # "smsn" (default) uses the device's Sidewalk manufacturing serial when known,
     # falling back to its wireless_device_id. "wireless_device_id" always uses that.
     MEMFAULT_DEVICE_SERIAL_SOURCE = _env("MEMFAULT_DEVICE_SERIAL_SOURCE", "smsn")
+    # Register the device in Memfault as soon as it is created in AWS, instead
+    # of waiting for its first chunk to create it implicitly. Without this the
+    # dashboard link points at a 404 until the device transmits, and
+    # hardware_version/cohort are whatever the first chunk happened to carry.
+    MEMFAULT_AUTO_CREATE_DEVICES = _bool_env("MEMFAULT_AUTO_CREATE_DEVICES", True)
+    # Must match the firmware's CONFIG_MEMFAULT_NCS_HW_VERSION exactly. The
+    # device reports its own hardware version with every chunk, so a mismatch
+    # here shows up in Memfault as the wrong hardware version on a real device
+    # and breaks OTA release targeting, which is hardware_version specific.
+    # The default is the value set in the paired firmware's
+    # overlay-memfault.conf, which is what firmware/SidewalkDevkit-Memfault.hex
+    # was built with; override this if that overlay changes.
+    MEMFAULT_HARDWARE_VERSION = _env("MEMFAULT_HARDWARE_VERSION", "sidewalk_devkit_nrf54l15")
+    # Optional cohort slug to place newly created devices in. Empty leaves the
+    # device in the project's default cohort.
+    MEMFAULT_COHORT = _env("MEMFAULT_COHORT", "")
     MEMFAULT_HTTP_TIMEOUT_SECS = _int_env("MEMFAULT_HTTP_TIMEOUT_SECS", 10)
     MEMFAULT_CHUNK_MAX_ATTEMPTS = _int_env("MEMFAULT_CHUNK_MAX_ATTEMPTS", 8)
     MEMFAULT_CHUNK_MAX_BACKOFF_SECS = _int_env("MEMFAULT_CHUNK_MAX_BACKOFF_SECS", 300)
