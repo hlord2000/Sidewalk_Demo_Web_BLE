@@ -129,18 +129,41 @@
     node.classList.add(`live-badge--${state}`);
   }
 
+  const EMPTY_TITLE_DEFAULT = "No Memfault data yet";
+
   // ---- Visibility state machine: exactly one of these four is shown ------
   function showOnly(which) {
     if (els.empty) els.empty.hidden = which !== "empty";
     if (els.notConfigured) els.notConfigured.hidden = which !== "notConfigured";
     if (els.error) els.error.hidden = which !== "error";
     if (els.stats) els.stats.hidden = which !== "stats";
+    // Reset the empty state's copy every time, so showWaiting()'s per-device
+    // wording cannot leak into the plain "no device selected" case. Callers
+    // that want custom copy set it after this returns.
+    if (els.emptyTitle) els.emptyTitle.textContent = EMPTY_TITLE_DEFAULT;
+    if (els.emptyDetail) {
+      els.emptyDetail.textContent = "";
+      els.emptyDetail.hidden = true;
+    }
   }
 
   function showError(message) {
     showOnly("error");
     if (els.error) els.error.textContent = message;
     setBadge(els.badge, "Error", "error");
+  }
+
+  // A device whose Sidewalk credentials exist but which has never sent a
+  // Memfault chunk is not a failure, so it reuses the empty state rather than
+  // the red error box.
+  function showWaiting(title, detail) {
+    showOnly("empty");
+    if (els.emptyTitle) els.emptyTitle.textContent = title;
+    if (els.emptyDetail) {
+      els.emptyDetail.textContent = detail || "";
+      els.emptyDetail.hidden = !detail;
+    }
+    setBadge(els.badge, "Awaiting data", "connecting");
   }
 
   // ---- Rendering ------------------------------------------------------------
@@ -158,6 +181,16 @@
 
     if (health.error) {
       showError(`Could not read this device from Memfault: ${health.error}`);
+      return;
+    }
+
+    if (health.registered === false) {
+      showWaiting(
+        "Not reporting to Memfault yet",
+        health.registrationError
+          ? `This device could not be registered in Memfault: ${health.registrationError}`
+          : `Registered as ${health.deviceSerial || "this device"}. Data appears once the device sends its first Memfault chunk.`
+      );
       return;
     }
 
@@ -368,6 +401,8 @@
 
     els.badge = document.getElementById("memfault-status-badge");
     els.empty = document.getElementById("memfault-empty");
+    els.emptyTitle = document.getElementById("memfault-empty-title");
+    els.emptyDetail = document.getElementById("memfault-empty-detail");
     els.notConfigured = document.getElementById("memfault-not-configured");
     els.error = document.getElementById("memfault-error");
     els.stats = document.getElementById("memfault-stats");

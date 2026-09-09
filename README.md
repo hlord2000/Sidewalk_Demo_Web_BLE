@@ -193,8 +193,12 @@ plus `app_memfault.c` seed the Memfault device id from the Sidewalk SMSN as
 uppercase hex at boot, which is the same normalization
 `provisioning.normalize_smsn` applies.
 
-The call is idempotent. Memfault documents 409 as the answer for a serial it
-already knows, so this treats 200 and 409 alike. It is also non-fatal:
+The call is idempotent, and both halves are verified against the live API: a
+first create answers 200 and a repeat answers 409, so this treats them alike.
+A device that has never sent a chunk answers 404 on the read side, which is
+reported as `registered: false` rather than an error, and the health read
+registers it on the spot. That is what heals devices created before
+registration existed, or created while Memfault was unreachable. It is also non-fatal:
 Memfault would create the device implicitly on its first chunk anyway, so a
 failure here is flashed as a warning and never rolls back a wireless device
 that was just created in AWS. Set `MEMFAULT_AUTO_CREATE_DEVICES=false` to

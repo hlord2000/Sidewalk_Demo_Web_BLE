@@ -40,6 +40,8 @@ def _name_of(value: Any) -> str | None:
     return None
 
 CHUNKS_UPLOAD_SUCCESS_STATUS = 202
+# Memfault answers 404 for a device serial it has never seen.
+DEVICE_MISSING_STATUS = 404
 # Memfault's create-device endpoint answers 409 when the serial already
 # exists, which the docs call out as the expected way to make the call
 # idempotent: "call the create-device endpoint every time and check for either
@@ -363,6 +365,25 @@ class MemfaultService:
             return result
 
         live = self._fetch_device_health(device_serial)
+
+        # Devices created before registration existed, or created while
+        # Memfault was unreachable, are absent from the project and answer
+        # 404 forever until their first chunk arrives. Register on first read
+        # so those devices heal themselves instead of needing an admin to
+        # re-create them, then re-read so the panel fills in immediately.
+        if (
+            live.get("registered") is False
+            and self._config.MEMFAULT_AUTO_CREATE_DEVICES
+            and not live.get("error")
+        ):
+            registration = self.ensure_device(
+                device_serial, nickname=device.get("name") or None
+            )
+            if registration.get("ok"):
+                live = self._fetch_device_health(device_serial)
+            else:
+                live["registrationError"] = registration.get("error")
+
         for key, value in live.items():
             if key not in ("configured", "device_serial"):
                 result[key] = value
@@ -405,6 +426,13 @@ class MemfaultService:
                 result["cohort"] = _name_of(data.get("cohort"))
                 nickname = data.get("nickname")
                 result["nickname"] = nickname or None
+                result["registered"] = True
+            elif response.status_code == DEVICE_MISSING_STATUS:
+                # Not an error: a device whose credentials exist in AWS but
+                # which has never sent a Memfault chunk legitimately does not
+                # exist in Memfault yet. Reporting it as "HTTP 404" made the
+                # dashboard show a red failure for a blank-but-healthy device.
+                result["registered"] = False
             else:
                 result["error"] = f"HTTP {response.status_code}"
         except requests.RequestException as exc:

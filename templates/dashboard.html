@@ -11,7 +11,7 @@
 <script defer src="{{ url_for('static', filename='sensors.js', v='20260618tsfix') }}"></script>
 <script defer src="{{ url_for('static', filename='provisioning.js', v='20260820wizard') }}"></script>
 <script defer src="{{ url_for('static', filename='health.js', v='20260820health') }}"></script>
-<script defer src="{{ url_for('static', filename='memfault_analytics.js', v='20260827memfault') }}"></script>
+<script defer src="{{ url_for('static', filename='memfault_analytics.js', v='20260909registration') }}"></script>
 <script defer src="{{ url_for('static', filename='app.js', v='20260827memfault') }}"></script>
 {% endblock %}
 {% block body %}
@@ -107,7 +107,8 @@
 
       <div id="memfault-empty" class="empty-state">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 4-6"/></svg>
-        <h3>No Memfault data yet</h3>
+        <h3 id="memfault-empty-title">No Memfault data yet</h3>
+        <p id="memfault-empty-detail" hidden></p>
       </div>
 
       <div id="memfault-not-configured" class="empty-state" hidden>
