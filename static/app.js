@@ -2663,13 +2663,27 @@ async function connectBleShell(
   });
   const errors = [];
 
+  // Each iteration re-reads bleServer instead of closing over it: the
+  // gattserverdisconnected handler calls resetBleShellState(), which nulls
+  // bleServer, so a device that drops the link during discovery used to make
+  // the next iteration throw "Cannot read properties of null" and the whole
+  // connect report "did not expose a supported service" -- both of which hid
+  // the real event, which is the disconnect.
   for (const profile of BLE_PROFILES) {
+    const server = bleServer;
+    if (!server || !(bleDevice && bleDevice.gatt && bleDevice.gatt.connected)) {
+      errors.push(`${profile.label}: skipped, the device disconnected during service discovery.`);
+      bleDebugError("BLE discovery aborted: link dropped", null, {
+        profile: profile.label,
+      });
+      break;
+    }
     try {
       bleDebug("Discovering BLE profile", {
         profile: profile.label,
         serviceUuid: profile.serviceUuid,
       });
-      const service = await bleServer.getPrimaryService(profile.serviceUuid);
+      const service = await server.getPrimaryService(profile.serviceUuid);
       bleRxCharacteristic = await service.getCharacteristic(profile.writeUuid);
       bleTxCharacteristic = await service.getCharacteristic(profile.notifyUuid);
       bleConnectedProfile = profile;
@@ -2690,6 +2704,16 @@ async function connectBleShell(
   }
 
   if (!bleConnectedProfile) {
+    // Distinguish "this device speaks neither profile" from "the link died
+    // before we could ask", which are different problems with different fixes.
+    const stillConnected = Boolean(bleDevice && bleDevice.gatt && bleDevice.gatt.connected);
+    if (!stillConnected) {
+      throw new Error(
+        "The device disconnected before its services could be read. " +
+          "It advertised and accepted the connection, then dropped it. " +
+          `Details: ${errors.join(" ")}`
+      );
+    }
     throw new Error(`Selected BLE device did not expose a supported service. ${errors.join(" ")}`);
   }
 
