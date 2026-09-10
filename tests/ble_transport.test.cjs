@@ -65,3 +65,12 @@ test('user cancellation during retry backoff prevents another connection',async(
  const s=discoverySetup();let cancelled=false;
  await assert.rejects(s.run({check(){if(cancelled)throw new Error('cancelled');},delay:async()=>{cancelled=true;}}),/cancelled/);assert.equal(s.attempts(),1);
 });
+
+test('every chooser entry point requires UART and never accepts the radio advertiser alone',async()=>{
+ const code=source.slice(source.indexOf('async function connectBleShellImpl('),source.indexOf('\nasync function disconnectBleShell'));
+ for(const options of [{},{anyDevice:true},{matchAnyAssigned:true}]){
+  let requested;const ctx=vm.createContext({window:{},navigator:{bluetooth:{requestDevice(opts){requested=opts;throw new Error('chooser');}}},stopBleNearbyScan(){},config:{canProvisionFirmware:true},currentDevice:()=>null,bleDebug(){},setBleStatus(){},BLE_PROFILES:[{serviceUuid:'nus'}]});
+  vm.runInContext(code,ctx);await assert.rejects(ctx.connectBleShellImpl('test',options),/chooser/);
+  assert.equal(requested.acceptAllDevices,undefined);assert.deepEqual(JSON.parse(JSON.stringify(requested.filters)),[{services:['nus']}]);assert.deepEqual(Array.from(requested.optionalServices),['nus']);
+ }
+});

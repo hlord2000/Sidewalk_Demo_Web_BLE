@@ -197,6 +197,7 @@ function bleRequestFilters(device) {
     return [];
   }
   const filters = [{
+    services: [BLE_PROFILES[0].serviceUuid],
     manufacturerData: [identityManufacturerFilter(device.identityFingerprint)],
   }];
   bleDebug("Built exact identity chooser filter", {
@@ -220,6 +221,7 @@ function bleAssignedDeviceFilters() {
     }
     fingerprints.add(device.identityFingerprint);
     filters.push({
+      services: [BLE_PROFILES[0].serviceUuid],
       manufacturerData: [identityManufacturerFilter(device.identityFingerprint)],
     });
   }
@@ -2659,36 +2661,14 @@ async function connectBleShellImpl(
     wirelessDeviceId: selectedDevice && selectedDevice.wirelessDeviceId,
     identityFingerprint: selectedDevice && selectedDevice.identityFingerprint,
   });
-  if (listAllDevices) {
-    setBleStatus("Listing every nearby Bluetooth device — pick your board by its advertised name…");
-  } else if (anyDevice || matchAnyAssigned || !selectedDevice?.identityFingerprint) {
-    setBleStatus("Scanning for Sidewalk command shells…");
-  } else {
-    setBleStatus(`Scanning only for ${selectedDevice.name} · ${selectedDevice.identityFingerprint}…`);
-  }
-
-  const optionalServices = BLE_PROFILES.map((profile) => profile.serviceUuid);
-  let chooserOptions;
-  if (listAllDevices) {
-    chooserOptions = {
-      acceptAllDevices: true,
-      optionalServices,
-    };
-  } else {
-    let filters = anyDevice ? [] : (matchAnyAssigned
-      ? bleAssignedDeviceFilters()
-      : bleRequestFilters(selectedDevice));
-    if (!filters.length) filters = [{ services: [BLE_PROFILES[0].serviceUuid] }];
-
-    if (!filters.length) {
-      throw new Error("The selected AWS device does not have an advertised BLE identity");
-    }
-
-    chooserOptions = {
-      filters,
-      optionalServices,
-    };
-  }
+  setBleStatus("Choose Sidewalk DK WebShell. Older firmware may appear as Sidewalk.");
+  const optionalServices = [BLE_PROFILES[0].serviceUuid];
+  // All entry points require the shell service. A display name alone is not
+  // sufficient: the separate Amazon radio advertiser shares the same board.
+  let filters = (anyDevice || listAllDevices) ? [] : (matchAnyAssigned
+    ? bleAssignedDeviceFilters() : bleRequestFilters(selectedDevice));
+  if (!filters.length) filters = [{ services: [BLE_PROFILES[0].serviceUuid] }];
+  const chooserOptions = { filters, optionalServices };
   bleDebug("requestDevice options", chooserOptions);
   const chosenDevice = existingDevice || await navigator.bluetooth.requestDevice(chooserOptions);
   await disconnectBleShell();
