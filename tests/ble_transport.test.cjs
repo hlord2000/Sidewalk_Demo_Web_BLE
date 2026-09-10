@@ -86,3 +86,24 @@ test('initial provisioning timeout keeps subscribed BLE connected and unverified
  vm.runInContext(code,ctx);await ctx.connectBleShell();
  assert.equal(disconnects,0);assert.equal(board.gatt.connected,true);assert.equal(enabled,true);assert.match(statuses.at(-1),/status unanswered/);
 });
+
+test('notification subscription is retried with fresh GATT discovery', async () => {
+ const s=discoverySetup({failures:0});let subscriptions=0;
+ await s.run({subscribe:async()=>{if(++subscriptions===1){s.board.gatt.connected=false;throw Object.assign(new Error('disconnected'),{name:'NetworkError'});}}});
+ assert.equal(subscriptions,2);assert.equal(s.attempts(),2);
+});
+test('Chrome cached GATT unknown subscription error gets bounded retry', async () => {
+ const s=discoverySetup({failures:0});let subscriptions=0;
+ await s.run({subscribe:async()=>{if(++subscriptions===1)throw Object.assign(new Error('GATT Error Unknown.'),{name:'NotSupportedError'});}});
+ assert.equal(subscriptions,2);assert.equal(s.attempts(),2);
+});
+test('a link lost just after subscription removes the failed attempt listener', async () => {
+ const s=discoverySetup({failures:0});let subscriptions=0,cleanups=0;
+ await s.run({subscribe:async()=>{if(++subscriptions===1)s.board.gatt.connected=false;return()=>cleanups++;}});
+ assert.equal(subscriptions,2);assert.equal(cleanups,1);
+});
+test('genuinely unsupported notifications are not retried', async () => {
+ const s=discoverySetup({failures:0});
+ await assert.rejects(s.run({subscribe:async()=>{throw Object.assign(new Error('Notifications unsupported'),{name:'NotSupportedError'});}}),/Notifications unsupported/);
+ assert.equal(s.attempts(),1);
+});

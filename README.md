@@ -325,6 +325,13 @@ The paired firmware expects:
 the only bundled image with Memfault compiled in, so the Memfault panels stay
 empty on any other image.
 
+The current image includes the NUS workqueue fix from firmware commit `ea8df51`:
+provisioning status is requested by the client after notification subscription,
+not printed from the Bluetooth system workqueue. Its SHA-256 is
+`6569409616180d7adac2faf29e82ab9ece5b6b8eb1f527d2bc22cf82c911fa9e`.
+The attached provisioned DK was readback-verified against this image, and its
+manufacturing credentials were unchanged.
+
 It is built from the `ncs-sidewalk-demo-application` repo, against the
 `sidewalk_devkit_nrf54l15` board and the out-of-tree board files:
 

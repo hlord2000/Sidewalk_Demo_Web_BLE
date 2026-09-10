@@ -2595,10 +2595,11 @@ async function runLocationAction(action) {
 }
 
 // Retry only transport setup. Never replay shell commands or provisioning writes.
-async function discoverBleShell(board, profile, { check = () => {}, progress = () => {}, delay = (ms) => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
+async function discoverBleShell(board, profile, { check = () => {}, progress = () => {}, subscribe = async () => {}, delay = (ms) => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
   for (let attempt = 1; attempt <= 3; attempt++) {
     check();
     progress(attempt);
+    let cleanup;
     try {
       const server = await board.gatt.connect();
       check();
@@ -2607,10 +2608,15 @@ async function discoverBleShell(board, profile, { check = () => {}, progress = (
       const tx = await service.getCharacteristic(profile.notifyUuid);
       check();
       if (!board.gatt.connected) throw new Error("Bluetooth disconnected during discovery");
+      cleanup = await subscribe({ server, rx, tx });
+      check();
+      if (!board.gatt.connected) throw new Error("Bluetooth disconnected during subscription");
       return { server, rx, tx };
     } catch (error) {
+      cleanup?.();
       check();
-      const transient = !board.gatt.connected || error.name === "NetworkError";
+      const transient = !board.gatt.connected || error.name === "NetworkError" ||
+        (error.name === "NotSupportedError" && error.message === "GATT Error Unknown.");
       if (!transient) throw error;
       if (attempt === 3) {
         throw new Error(`Bluetooth disconnected during setup after 3 attempts. Selected device: ${board.name || "unnamed"}. ${error.message}`);
@@ -2703,30 +2709,9 @@ async function connectBleShellImpl(
     appendTerminal("\n[disconnected]\n");
   };
 
-  const profile = BLE_PROFILES.find(item => item.textShell);
-  try {
-    const discovered = await discoverBleShell(chosenDevice, profile, {
-      check() {
-        if (bleDevice !== chosenDevice || setupGeneration !== bleTransportGeneration) {
-          throw new Error("Bluetooth connection cancelled");
-        }
-      },
-      progress(attempt) {
-        setBleStatus(`Connecting to ${chosenDevice.name || "Sidewalk shell"} · attempt ${attempt}/3…`);
-        bleDebug("Connecting and discovering UART shell", { name: chosenDevice.name, attempt });
-      },
-    });
-    bleServer = discovered.server;
-    bleRxCharacteristic = discovered.rx;
-    bleTxCharacteristic = discovered.tx;
-    bleConnectedProfile = profile;
-  } finally {
-    discovering = false;
-  }
   bleLogDeviceId = null;
   bleLogBleName = chosenDevice.name || "";
 
-  const notifyCharacteristic = bleTxCharacteristic;
   let notificationChunks = 0;
   let notificationBytes = 0;
   const onNotification = (event) => {
@@ -2741,11 +2726,41 @@ async function connectBleShellImpl(
     appendTerminal(chunk);
     queueBleLogText(chunk);
   };
-  notifyCharacteristic.addEventListener("characteristicvaluechanged", onNotification);
-  bleNotificationCleanup = () => notifyCharacteristic.removeEventListener("characteristicvaluechanged", onNotification);
-  bleDebug("Starting NUS notifications", { characteristic: notifyCharacteristic.uuid, properties: notifyCharacteristic.properties });
-  await notifyCharacteristic.startNotifications();
-  bleDebug("NUS notifications enabled", { chunks: notificationChunks, bytes: notificationBytes });
+
+  const profile = BLE_PROFILES.find(item => item.textShell);
+  try {
+    const discovered = await discoverBleShell(chosenDevice, profile, {
+      check() {
+        if (bleDevice !== chosenDevice || setupGeneration !== bleTransportGeneration) {
+          throw new Error("Bluetooth connection cancelled");
+        }
+      },
+      progress(attempt) {
+        setBleStatus(`Connecting to ${chosenDevice.name || "Sidewalk shell"} · attempt ${attempt}/3…`);
+        bleDebug("Connecting and discovering UART shell", { name: chosenDevice.name, attempt });
+      },
+      async subscribe({ tx }) {
+        const cleanup = () => tx.removeEventListener("characteristicvaluechanged", onNotification);
+        tx.addEventListener("characteristicvaluechanged", onNotification);
+        try {
+          bleDebug("Starting NUS notifications", { characteristic: tx.uuid, properties: tx.properties });
+          await tx.startNotifications();
+          bleDebug("NUS notifications enabled", { chunks: notificationChunks, bytes: notificationBytes });
+          bleNotificationCleanup = cleanup;
+          return cleanup;
+        } catch (error) {
+          cleanup();
+          throw error;
+        }
+      },
+    });
+    bleServer = discovered.server;
+    bleRxCharacteristic = discovered.rx;
+    bleTxCharacteristic = discovered.tx;
+    bleConnectedProfile = profile;
+  } finally {
+    discovering = false;
+  }
 
   setConnState(true);
   appendTerminal(`[connected ${bleDevice.name || "device"} over ${bleConnectedProfile.label}]\n`);
