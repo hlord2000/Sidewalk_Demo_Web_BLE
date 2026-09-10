@@ -1956,7 +1956,15 @@ let locationInitialized = false;
 let locationBusy = false;
 let locationGatewayState = null;
 
+let bleNotificationCleanup = null;
+let bleTransportGeneration = 0;
+let bleWriteQueue = Promise.resolve();
+let bleConnecting = 0;
+
 function resetBleShellState() {
+  bleTransportGeneration++;
+  bleNotificationCleanup?.();
+  bleNotificationCleanup = null;
   settleBleIdentityWait(new Error("BLE disconnected before identity verification"));
   bleManualSession = false;
   bleDevice = null;
@@ -2584,7 +2592,22 @@ async function runLocationAction(action) {
   }
 }
 
-async function connectBleShell(
+async function connectBleShell(source = "connect-button", options = {}) {
+  if (bleConnecting && source !== "automatic-verify") throw new Error("A Bluetooth connection is already in progress");
+  bleConnecting++;
+  try {
+    return await connectBleShellImpl(source, options);
+  } catch (error) {
+    // A failed discovery/subscription must not leave a half-connected device.
+    if (bleDevice?.gatt?.connected) bleDevice.gatt.disconnect();
+    resetBleShellState();
+    throw error;
+  } finally {
+    bleConnecting--;
+  }
+}
+
+async function connectBleShellImpl(
   source = "connect-button",
   { matchAnyAssigned = false, anyDevice = false, existingDevice = null } = {},
 ) {
@@ -2595,27 +2618,11 @@ async function connectBleShell(
     throw new Error("Bluetooth is unavailable in this browser. Use USB or open the site in Chrome.");
   }
 
-  if (serialBoard) await disconnectBleShell();
+  // Keep requestDevice in the click's user activation: no network or USB awaits.
   stopBleNearbyScan();
-  // Authorized customers can connect a blank board before any cloud record exists.
+  const listAllDevices = anyDevice;
   anyDevice = anyDevice || Boolean(config.canProvisionFirmware);
-  bleManualSession = anyDevice;
-
-  let selectedDevice = null;
-  if (anyDevice) {
-    // A board on older firmware may not advertise an identity at all, so a missing
-    // or unresolvable AWS identity must not block the manual chooser.
-    selectedDevice = currentDevice();
-    if (selectedDevice) {
-      try {
-        await ensureDeviceIdentity(selectedDevice);
-      } catch (error) {
-        bleDebugError("Could not preload the selected device identity", error);
-      }
-    }
-  } else {
-    selectedDevice = await ensureDeviceIdentity(currentDevice());
-  }
+  const selectedDevice = currentDevice();
 
   bleDebug("Opening Web Bluetooth chooser", {
     source,
@@ -2625,9 +2632,9 @@ async function connectBleShell(
     wirelessDeviceId: selectedDevice && selectedDevice.wirelessDeviceId,
     identityFingerprint: selectedDevice && selectedDevice.identityFingerprint,
   });
-  if (anyDevice) {
+  if (listAllDevices) {
     setBleStatus("Listing every nearby Bluetooth device — pick your board by its advertised name…");
-  } else if (matchAnyAssigned) {
+  } else if (anyDevice || matchAnyAssigned || !selectedDevice?.identityFingerprint) {
     setBleStatus("Scanning for WebShells assigned to this account…");
   } else {
     setBleStatus(`Scanning only for ${selectedDevice.name} · ${selectedDevice.identityFingerprint}…`);
@@ -2635,15 +2642,16 @@ async function connectBleShell(
 
   const optionalServices = BLE_PROFILES.map((profile) => profile.serviceUuid);
   let chooserOptions;
-  if (anyDevice) {
+  if (listAllDevices) {
     chooserOptions = {
       acceptAllDevices: true,
       optionalServices,
     };
   } else {
-    const filters = matchAnyAssigned
+    let filters = anyDevice ? [] : (matchAnyAssigned
       ? bleAssignedDeviceFilters()
-      : bleRequestFilters(selectedDevice);
+      : bleRequestFilters(selectedDevice));
+    if (!filters.length) filters = [{ services: [BLE_PROFILES[0].serviceUuid] }];
 
     if (!filters.length) {
       throw new Error("The selected AWS device does not have an advertised BLE identity");
@@ -2655,7 +2663,10 @@ async function connectBleShell(
     };
   }
   bleDebug("requestDevice options", chooserOptions);
-  bleDevice = existingDevice || await navigator.bluetooth.requestDevice(chooserOptions);
+  const chosenDevice = existingDevice || await navigator.bluetooth.requestDevice(chooserOptions);
+  await disconnectBleShell();
+  bleManualSession = anyDevice;
+  bleDevice = chosenDevice;
   bleDebug("Chooser selected device", {
     name: bleDevice.name,
     bluetoothDeviceId: bleDevice.id,
@@ -2663,6 +2674,7 @@ async function connectBleShell(
   });
 
   bleDevice.ongattserverdisconnected = () => {
+    if (bleDevice !== chosenDevice) return;
     bleDebug("GATT disconnected", {
       name: bleDevice && bleDevice.name,
       bluetoothDeviceId: bleDevice && bleDevice.id,
@@ -2748,16 +2760,16 @@ async function connectBleShell(
     throw new Error(`Selected BLE device did not expose a supported service. ${errors.join(" ")}`);
   }
 
-  await bleTxCharacteristic.startNotifications();
-  bleDebug("Notifications started", {
-    profile: bleConnectedProfile.label,
-    notifyUuid: bleConnectedProfile.notifyUuid,
-  });
-  bleTxCharacteristic.addEventListener("characteristicvaluechanged", (event) => {
+  const notifyCharacteristic = bleTxCharacteristic;
+  const onNotification = (event) => {
+    if (bleDevice !== chosenDevice) return;
     const chunk = textDecoder.decode(event.target.value, { stream: true });
     appendTerminal(chunk);
     queueBleLogText(chunk);
-  });
+  };
+  notifyCharacteristic.addEventListener("characteristicvaluechanged", onNotification);
+  bleNotificationCleanup = () => notifyCharacteristic.removeEventListener("characteristicvaluechanged", onNotification);
+  await notifyCharacteristic.startNotifications();
 
   setConnState(true);
   appendTerminal(`[connected ${bleDevice.name || "device"} over ${bleConnectedProfile.label}]\n`);
@@ -2771,6 +2783,7 @@ async function connectBleShell(
     setBleStatus("Connected over BLE · verifying Sidewalk identity…");
     setBleWorkflowStatus("Verifying the board against its AWS Sidewalk record…");
     const identityPromise = waitForBleIdentity();
+    identityPromise.catch(() => {});
     bleDebug("Sending identity verification command", { command: "sid identity" });
     await sendBleCommand("sid identity");
     let identifiedDevice = null;
@@ -2846,6 +2859,7 @@ async function disconnectBleShell() {
   }
   if (bleDevice && bleDevice.gatt.connected) {
     bleDevice.gatt.disconnect();
+    resetBleShellState();
     return;
   }
 
@@ -2853,41 +2867,46 @@ async function disconnectBleShell() {
   setBleStatus("Disconnected");
 }
 
-async function sendBleCommand(command) {
-  if (serialBoard) {
-    const writer = serialBoard.port.writable.getWriter();
-    try { await writer.write(textEncoder.encode(`${command}\n`)); }
-    finally { writer.releaseLock(); }
-    return;
-  }
-  if (!bleRxCharacteristic && !serialBoard) {
-    throw new Error("Device shell is not connected");
-  }
-
-  if (bleConnectedProfile && !bleConnectedProfile.textShell) {
-    throw new Error("Sidewalk BLE is connected; sid shell commands are on RTT for this devkit");
-  }
-
-  const bytes = textEncoder.encode(`${command}\n`);
-
-  // Write Without Response is capped at ATT_MTU - 3, and Web Bluetooth gives us
-  // no way to read the negotiated MTU. A provisioning "prov set" line runs to
-  // about 106 bytes, which needs MTU >= 109. Chrome usually negotiates the
-  // peripheral's 247, but a 23 byte default has been observed on this hardware
-  // from other BLE stacks, and there the whole command would be rejected.
-  // Splitting at 20 bytes is correct at any MTU; the shell reassembles on the
-  // trailing newline. Six writes for the longest command costs nothing.
-  const CHUNK = 20;
-  for (let offset = 0; offset < bytes.length; offset += CHUNK) {
-    const slice = bytes.slice(offset, offset + CHUNK);
-    if (bleRxCharacteristic.writeValueWithoutResponse) {
-      await bleRxCharacteristic.writeValueWithoutResponse(slice);
-    } else if (bleRxCharacteristic.writeValueWithResponse) {
-      await bleRxCharacteristic.writeValueWithResponse(slice);
-    } else {
-      await bleRxCharacteristic.writeValue(slice);
+function sendBleCommand(command) {
+  // Serialize complete lines, not individual chunks. A disconnect invalidates
+  // queued commands so they cannot accidentally reach a replacement board.
+  const generation = bleTransportGeneration;
+  const board = serialBoard;
+  const characteristic = bleRxCharacteristic;
+  const run = async () => {
+    const check = () => {
+      if (generation !== bleTransportGeneration ||
+          (board ? serialBoard !== board : bleRxCharacteristic !== characteristic) ||
+          (!board && !characteristic)) throw new Error("Device shell disconnected; command cancelled");
+    };
+    check();
+    const bytes = textEncoder.encode(`${command}\n`);
+    if (board) {
+      const writer = board.port.writable.getWriter();
+      try { await writer.write(bytes); } finally { writer.releaseLock(); }
+      return;
     }
-  }
+    if (!bleConnectedProfile?.textShell) throw new Error("This Bluetooth service does not expose the command shell");
+    const properties = characteristic.properties;
+    for (let offset = 0; offset < bytes.length; offset += 20) {
+      check();
+      const chunk = bytes.slice(offset, offset + 20);
+      // Method existence does not indicate peripheral support. Prefer confirmed
+      // writes for shell/provisioning traffic; 20 bytes works at the minimum MTU.
+      if (properties.write && characteristic.writeValueWithResponse) {
+        await characteristic.writeValueWithResponse(chunk);
+      } else if (properties.writeWithoutResponse && characteristic.writeValueWithoutResponse) {
+        await characteristic.writeValueWithoutResponse(chunk);
+      } else if (properties.write && characteristic.writeValue) {
+        await characteristic.writeValue(chunk);
+      } else {
+        throw new Error("The Bluetooth shell characteristic is not writable");
+      }
+    }
+  };
+  const pending = bleWriteQueue.then(run);
+  bleWriteQueue = pending.catch(() => {});
+  return pending;
 }
 
 if (downlinkForm) {
@@ -3436,4 +3455,17 @@ if (automaticUsbButton) {
       if (status) status.textContent = error.message;
     } finally { automaticUsbButton.disabled = false; }
   });
+}
+
+// Explain capability failure before the user repeatedly tries to connect.
+if (!navigator.bluetooth?.requestDevice) {
+  const message = "Bluetooth is unavailable in this browser. Open this page in a browser with Web Bluetooth enabled, or connect over USB. On Linux Chrome, enable Experimental Web Platform features in chrome://flags and restart Chrome.";
+  const notice = document.getElementById("ble-availability");
+  if (notice) { notice.hidden = false; notice.textContent = message; }
+  for (const id of ["ble-connect", "ble-connect-any", "ble-scan", "prov-automatic-connect"]) {
+    const button = document.getElementById(id);
+    if (button) { button.disabled = true; button.title = message; }
+  }
+  const setupStatus = document.getElementById("prov-automatic-status");
+  if (setupStatus) setupStatus.textContent = message;
 }
