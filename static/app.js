@@ -1515,7 +1515,7 @@ async function registerProvisionedDevice(summary) {
 }
 
 async function activateDevice(device) {
-  if (!device || !deviceSelector || deviceSelector.value === String(device.id)) {
+  if (!device || !deviceSelector || (deviceSelector.value === String(device.id) && String(config.selectedDeviceId) === String(device.id))) {
     return;
   }
 

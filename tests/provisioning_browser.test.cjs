@@ -75,3 +75,26 @@ test('rejected credential aborts without finalize, reboot or verified status', a
   assert.equal(s.commands.includes('prov reboot'), false);
   assert.deepEqual(s.statuses, ['attempted', 'failed']);
 });
+
+test('first device activates the dashboard even when adding its option auto-selects it', async () => {
+  const source = fs.readFileSync('static/app.js', 'utf8');
+  const start = source.indexOf('async function registerProvisionedDevice(');
+  const end = source.indexOf('function updateConnectedDeviceUi(', start);
+  const selector = { value: '', disabled: true, add(option) { this.value = option.value; } };
+  const config = { selectedDeviceId: null };
+  let refreshed = false, subscribed = false;
+  const context = vm.createContext({
+    config, deviceSelector: selector, devices: [], deviceMap: new Map(), deviceByWirelessId: new Map(),
+    document: { getElementById: () => null },
+    Option: function(text, value) { this.text = text; this.value = value; },
+    indexDeviceIdentity() {}, updateSelectedDeviceUi() { refreshed = true; },
+    applySensorRange: async () => {}, connectEventStream() { subscribed = true; },
+    URL, window: { location: { href: 'https://example.com/' }, history: { replaceState() {} } },
+  });
+  vm.runInContext(source.slice(start, end), context);
+  await context.registerProvisionedDevice({ id: 123, name: 'First device', wirelessDeviceId: 'aws-123' });
+  assert.equal(config.selectedDeviceId, 123);
+  assert.equal(selector.disabled, false);
+  assert.equal(refreshed, true);
+  assert.equal(subscribed, true);
+});

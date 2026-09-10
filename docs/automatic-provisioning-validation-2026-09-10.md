@@ -34,9 +34,9 @@ Sidewalk gateway registration/uplink test.
 - 120 Python tests passed, including allowed/denied customer permissions,
   cross-account isolation, empty-account onboarding, identical AWS retry
   tokens, artifact-fetch failure recovery, and Memfault failure recovery.
-- Five JavaScript flow tests passed: successful setup with synchronous replies,
+- Six JavaScript flow tests passed: successful setup with synchronous replies,
   denied account, existing identity, identity appearing before erase, and
-  rejected credential abort.
+  rejected credential abort, and first-device dashboard activation.
 - Mobile layout checked at 390 CSS pixels. Wrapped the long device serial to
   remove horizontal overflow on the verification screen.
 - JavaScript syntax checks and `git diff --check` passed.
