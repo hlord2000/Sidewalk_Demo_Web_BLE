@@ -79,7 +79,7 @@
         <form method="post" action="{{ url_for('update_customer_permissions', customer_id=customer.id) }}" class="switch-row js-autosubmit">
           <label class="checkbox-row">
             <input type="checkbox" name="can_provision" value="1" {% if customer.can_provision %}checked{% endif %}>
-            <span>Allow firmware provisioning</span>
+            <span>Allow automatic device provisioning</span>
           </label>
           <button type="submit" class="ghost-button switch-save">Save</button>
         </form>
@@ -276,7 +276,7 @@
         </label>
         <label class="checkbox-row">
           <input type="checkbox" name="can_provision" value="1">
-          <span>Allow this account to provision assigned devices into firmware</span>
+          <span>Allow this account to create Amazon and Memfault devices and upload certificates</span>
         </label>
       </div>
       <div class="modal-foot">
