@@ -41,3 +41,27 @@ test('chooser opens synchronously without awaiting device identity requests',asy
  let requested=false;const ctx=vm.createContext({window:{},navigator:{bluetooth:{requestDevice(){requested=true;throw new Error('chooser reached');}}},stopBleNearbyScan(){},config:{canProvisionFirmware:true},currentDevice:()=>({name:'Test'}),bleDebug(){},setBleStatus(){},BLE_PROFILES:[{serviceUuid:'nus'}]});
  vm.runInContext(code,ctx);const pending=ctx.connectBleShellImpl();assert.equal(requested,true);await assert.rejects(pending,/chooser reached/);
 });
+
+const discoverySource=source.slice(source.indexOf('async function discoverBleShell('),source.indexOf('async function connectBleShell(source'));
+function discoverySetup({failures=1,permanent=false}={}) {
+ let attempts=0;const delays=[];const rx={uuid:'rx'},tx={uuid:'tx'};
+ const board={name:'Sidewalk',gatt:{connected:false,disconnect(){this.connected=false;},async connect(){attempts++;this.connected=true;return this;},async getPrimaryService(){
+  if(attempts<=failures){this.connected=permanent;const e=new Error(permanent?'Service not found':'GATT Server is disconnected');e.name=permanent?'NotFoundError':'NetworkError';throw e;}
+  return{async getCharacteristic(uuid){return uuid==='rx'?rx:tx;}};
+ }}};
+ const ctx=vm.createContext({setTimeout});vm.runInContext(discoverySource,ctx);
+ return {board,attempts:()=>attempts,delays,run:(extra={})=>ctx.discoverBleShell(board,{serviceUuid:'nus',writeUuid:'rx',notifyUuid:'tx'},{delay:async ms=>delays.push(ms),...extra})};
+}
+test('discovery reconnects the chosen board after a dropped first connection',async()=>{
+ const s=discoverySetup();const result=await s.run();assert.equal(s.attempts(),2);assert.equal(result.rx.uuid,'rx');assert.deepEqual(s.delays,[600]);
+});
+test('persistent connection drops stop after three attempts',async()=>{
+ const s=discoverySetup({failures:10});await assert.rejects(s.run(),/after 3 attempts/);assert.equal(s.attempts(),3);
+});
+test('missing UART service on a connected device does not trigger retries',async()=>{
+ const s=discoverySetup({permanent:true});await assert.rejects(s.run(),/Service not found/);assert.equal(s.attempts(),1);
+});
+test('user cancellation during retry backoff prevents another connection',async()=>{
+ const s=discoverySetup();let cancelled=false;
+ await assert.rejects(s.run({check(){if(cancelled)throw new Error('cancelled');},delay:async()=>{cancelled=true;}}),/cancelled/);assert.equal(s.attempts(),1);
+});

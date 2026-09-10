@@ -1764,7 +1764,7 @@ async function scanNearbyDevices() {
     bleNearby.hidden = false;
   }
   if (bleScanStatus) {
-    bleScanStatus.textContent = "Opening Chrome's nearby chooser for assigned WebShells…";
+    bleScanStatus.textContent = "Opening the nearby chooser for Sidewalk command shells…";
   }
   renderNearbyDevices();
   bleDebug("Using native chooser instead of experimental passive scanning");
@@ -2592,6 +2592,33 @@ async function runLocationAction(action) {
   }
 }
 
+// Retry only transport setup. Never replay shell commands or provisioning writes.
+async function discoverBleShell(board, profile, { check = () => {}, progress = () => {}, delay = (ms) => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    check();
+    progress(attempt);
+    try {
+      const server = await board.gatt.connect();
+      check();
+      const service = await server.getPrimaryService(profile.serviceUuid);
+      const rx = await service.getCharacteristic(profile.writeUuid);
+      const tx = await service.getCharacteristic(profile.notifyUuid);
+      check();
+      if (!board.gatt.connected) throw new Error("Bluetooth disconnected during discovery");
+      return { server, rx, tx };
+    } catch (error) {
+      check();
+      const transient = !board.gatt.connected || error.name === "NetworkError";
+      if (!transient) throw error;
+      if (attempt === 3) {
+        throw new Error(`Bluetooth disconnected during setup after 3 attempts. Selected device: ${board.name || "unnamed"}. ${error.message}`);
+      }
+      if (board.gatt.connected) board.gatt.disconnect();
+      await delay(attempt * 600);
+    }
+  }
+}
+
 async function connectBleShell(source = "connect-button", options = {}) {
   if (bleConnecting && source !== "automatic-verify") throw new Error("A Bluetooth connection is already in progress");
   bleConnecting++;
@@ -2635,7 +2662,7 @@ async function connectBleShellImpl(
   if (listAllDevices) {
     setBleStatus("Listing every nearby Bluetooth device — pick your board by its advertised name…");
   } else if (anyDevice || matchAnyAssigned || !selectedDevice?.identityFingerprint) {
-    setBleStatus("Scanning for WebShells assigned to this account…");
+    setBleStatus("Scanning for Sidewalk command shells…");
   } else {
     setBleStatus(`Scanning only for ${selectedDevice.name} · ${selectedDevice.identityFingerprint}…`);
   }
@@ -2673,8 +2700,10 @@ async function connectBleShellImpl(
     gattConnected: Boolean(bleDevice.gatt && bleDevice.gatt.connected),
   });
 
+  let discovering = true;
+  const setupGeneration = bleTransportGeneration;
   bleDevice.ongattserverdisconnected = () => {
-    if (bleDevice !== chosenDevice) return;
+    if (bleDevice !== chosenDevice || discovering) return;
     bleDebug("GATT disconnected", {
       name: bleDevice && bleDevice.name,
       bluetoothDeviceId: bleDevice && bleDevice.id,
@@ -2693,72 +2722,28 @@ async function connectBleShellImpl(
     appendTerminal("\n[disconnected]\n");
   };
 
-  bleDebug("Connecting GATT", {
-    name: bleDevice.name,
-    bluetoothDeviceId: bleDevice.id,
-  });
-  bleServer = await bleDevice.gatt.connect();
+  const profile = BLE_PROFILES.find(item => item.textShell);
+  try {
+    const discovered = await discoverBleShell(chosenDevice, profile, {
+      check() {
+        if (bleDevice !== chosenDevice || setupGeneration !== bleTransportGeneration) {
+          throw new Error("Bluetooth connection cancelled");
+        }
+      },
+      progress(attempt) {
+        setBleStatus(`Connecting to ${chosenDevice.name || "Sidewalk shell"} · attempt ${attempt}/3…`);
+        bleDebug("Connecting and discovering UART shell", { name: chosenDevice.name, attempt });
+      },
+    });
+    bleServer = discovered.server;
+    bleRxCharacteristic = discovered.rx;
+    bleTxCharacteristic = discovered.tx;
+    bleConnectedProfile = profile;
+  } finally {
+    discovering = false;
+  }
   bleLogDeviceId = null;
-  bleLogBleName = bleDevice.name || "";
-  bleDebug("GATT connected", {
-    name: bleDevice.name,
-    bluetoothDeviceId: bleDevice.id,
-  });
-  const errors = [];
-
-  // Each iteration re-reads bleServer instead of closing over it: the
-  // gattserverdisconnected handler calls resetBleShellState(), which nulls
-  // bleServer, so a device that drops the link during discovery used to make
-  // the next iteration throw "Cannot read properties of null" and the whole
-  // connect report "did not expose a supported service" -- both of which hid
-  // the real event, which is the disconnect.
-  for (const profile of BLE_PROFILES) {
-    const server = bleServer;
-    if (!server || !(bleDevice && bleDevice.gatt && bleDevice.gatt.connected)) {
-      errors.push(`${profile.label}: skipped, the device disconnected during service discovery.`);
-      bleDebugError("BLE discovery aborted: link dropped", null, {
-        profile: profile.label,
-      });
-      break;
-    }
-    try {
-      bleDebug("Discovering BLE profile", {
-        profile: profile.label,
-        serviceUuid: profile.serviceUuid,
-      });
-      const service = await server.getPrimaryService(profile.serviceUuid);
-      bleRxCharacteristic = await service.getCharacteristic(profile.writeUuid);
-      bleTxCharacteristic = await service.getCharacteristic(profile.notifyUuid);
-      bleConnectedProfile = profile;
-      bleDebug("Discovered BLE profile", {
-        profile: profile.label,
-        serviceUuid: profile.serviceUuid,
-        writeUuid: profile.writeUuid,
-        notifyUuid: profile.notifyUuid,
-      });
-      break;
-    } catch (error) {
-      const message = error && error.message ? error.message : String(error);
-      errors.push(`${profile.label}: ${message}`);
-      bleDebugError(`BLE profile discovery failed: ${profile.label}`, error, {
-        serviceUuid: profile.serviceUuid,
-      });
-    }
-  }
-
-  if (!bleConnectedProfile) {
-    // Distinguish "this device speaks neither profile" from "the link died
-    // before we could ask", which are different problems with different fixes.
-    const stillConnected = Boolean(bleDevice && bleDevice.gatt && bleDevice.gatt.connected);
-    if (!stillConnected) {
-      throw new Error(
-        "The device disconnected before its services could be read. " +
-          "It advertised and accepted the connection, then dropped it. " +
-          `Details: ${errors.join(" ")}`
-      );
-    }
-    throw new Error(`Selected BLE device did not expose a supported service. ${errors.join(" ")}`);
-  }
+  bleLogBleName = chosenDevice.name || "";
 
   const notifyCharacteristic = bleTxCharacteristic;
   const onNotification = (event) => {
