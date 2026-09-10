@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 
-function setup({ allowed = true, provisioned = false, rejectWrite = false, changedBeforeWrite = false } = {}) {
+function setup({ allowed = true, provisioned = false, rejectWrite = false, changedBeforeWrite = false, missingReplies = 0 } = {}) {
   const elements = new Map();
   const el = (id) => {
     if (!elements.has(id)) elements.set(id, { dataset: {}, style: {}, classList: { toggle() {} }, addEventListener() {}, append() {}, replaceChildren() {} });
@@ -35,6 +35,7 @@ function setup({ allowed = true, provisioned = false, rejectWrite = false, chang
       // Deliberately deliver each response BEFORE the send promise resolves.
       if (command === 'prov status') {
         reads++;
+        if (reads <= missingReplies) return;
         api.ingestEvent({ t: 'prov', provisioned: provisioned || finalized || (changedBeforeWrite && reads > 1), smsn: device.sidewalkSmsn });
       }
       if (command.startsWith('prov set')) api.ingestEvent({ t: 'provwr', id: 4, ok: !rejectWrite });
@@ -98,3 +99,16 @@ test('first device activates the dashboard even when adding its option auto-sele
   assert.equal(refreshed, true);
   assert.equal(subscribed, true);
 });
+
+ test('lost initial status reply retries only the read before accepting provisioned state', async () => {
+  const s = setup({ provisioned: true, missingReplies: 1 });
+  assert.equal(await s.api.autoProvisionConnected(s.board), false);
+  assert.deepEqual(s.commands, ['prov status', 'prov status']);
+  assert.deepEqual(s.requests, []);
+ });
+ test('silent device never creates cloud records or writes certificates', async () => {
+  const s = setup({ missingReplies: 2 });
+  await assert.rejects(s.api.autoProvisionConnected(s.board), error => error.code === 'INITIAL_PROV_STATUS_TIMEOUT');
+  assert.deepEqual(s.commands, ['prov status', 'prov status']);
+  assert.deepEqual(s.requests, []);
+ });

@@ -91,7 +91,9 @@
       const timer = window.setTimeout(() => {
         if (pendingWait && pendingWait.timer === timer) {
           pendingWait = null;
-          reject(new Error(timeoutMessage));
+          const error = new Error(timeoutMessage);
+          error.code = "DEVICE_REPLY_TIMEOUT";
+          reject(error);
         }
       }, timeoutMs);
       pendingWait = { predicate, resolve, reject, timer };
@@ -148,7 +150,13 @@
       clearPendingWait(error);
       throw error;
     }
-    const event = await reply;
+    let event;
+    try {
+      event = await reply;
+    } catch (error) {
+      if (error.code === "DEVICE_REPLY_TIMEOUT") error.code = "PROV_STATUS_TIMEOUT";
+      throw error;
+    }
     detectedProv = event;
     return event;
   }
@@ -260,7 +268,20 @@
     try {
       connected = true;
       automaticStatus("Checking whether this device needs setup…");
-      const state = await detectProvisionStatus(PROV_STATUS_TIMEOUT_MS);
+      let state;
+      try {
+        state = await detectProvisionStatus(PROV_STATUS_TIMEOUT_MS);
+      } catch (error) {
+        if (error.code !== "PROV_STATUS_TIMEOUT" || !hooks.boardConnected(board) || hooks.connectedBoard() !== board) throw error;
+        automaticStatus("No status reply yet. Retrying the device status check…");
+        // Only this read-only query is retried; credential writes are never replayed.
+        try {
+          state = await detectProvisionStatus(PROV_STATUS_TIMEOUT_MS);
+        } catch (retryError) {
+          if (retryError.code === "PROV_STATUS_TIMEOUT") retryError.code = "INITIAL_PROV_STATUS_TIMEOUT";
+          throw retryError;
+        }
+      }
       if (state.provisioned !== false) {
         automaticStatus("This device is already provisioned.", "success");
         return false;

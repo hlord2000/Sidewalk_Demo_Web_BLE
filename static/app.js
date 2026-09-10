@@ -2742,7 +2742,20 @@ async function connectBleShellImpl(
   if (bleConnectedProfile.textShell) {
     setBleShellControlsDisabled(true);
     if (config.canProvisionFirmware && !source.startsWith("provision-wizard") && source !== "automatic-verify") {
-      if (await window.SidewalkProvisioning.autoProvisionConnected(bleDevice)) return;
+      try {
+        if (await window.SidewalkProvisioning.autoProvisionConnected(bleDevice)) return;
+      } catch (error) {
+        if (error.code !== "INITIAL_PROV_STATUS_TIMEOUT" || bleDevice !== chosenDevice || !chosenDevice.gatt.connected) throw error;
+        // A silent shell is not a failed GATT connection. Keep diagnostics
+        // available, without attributing this board or starting cloud setup.
+        bleDebugError("Provisioning status unanswered; keeping BLE connected", error);
+        setBleShellControlsDisabled(false);
+        updateConnectedDeviceUi({ name: chosenDevice.name || "Unknown board", wirelessDeviceId: "unverified" });
+        setBleStatus("BLE connected · device status unanswered");
+        setBleWorkflowStatus("Setup paused: no prov status reply after two checks. The board is unverified; certificates have not been uploaded. Use the shell to retry prov status, or disconnect and reconnect to retry setup.");
+        appendTerminal("[warning] Device status unanswered; BLE remains connected. Automatic setup is paused.\n");
+        return;
+      }
     }
     if (source === "automatic-verify") return;
 

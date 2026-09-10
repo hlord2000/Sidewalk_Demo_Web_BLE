@@ -74,3 +74,15 @@ test('every chooser matches the exact shell name or UART UUID, never the radio n
   assert.equal(requested.acceptAllDevices,undefined);assert.deepEqual(JSON.parse(JSON.stringify(requested.filters)),[{name:'Sidewalk DK WebShell'},{services:['nus']}]);assert.deepEqual(Array.from(requested.optionalServices),['nus']);
  }
 });
+
+test('initial provisioning timeout keeps subscribed BLE connected and unverified', async () => {
+ const code=source.slice(source.indexOf('async function connectBleShell(source'),source.indexOf('\nasync function disconnectBleShell'));
+ let disconnects=0, enabled=false; const statuses=[];
+ const board={name:'Sidewalk DK WebShell',gatt:{connected:true,disconnect(){disconnects++;this.connected=false;}}};
+ const tx={addEventListener(){},removeEventListener(){},async startNotifications(){}};
+ const ctx=vm.createContext({window:{SidewalkProvisioning:{isBusy:()=>false,async autoProvisionConnected(){const e=new Error('silent');e.code='INITIAL_PROV_STATUS_TIMEOUT';throw e;}}},navigator:{bluetooth:{requestDevice:async()=>board}},
+ bleConnecting:0,bleTransportGeneration:0,bleDevice:null,config:{canProvisionFirmware:true},BLE_PROFILES:[{serviceUuid:'nus',textShell:true,label:'UART'}],
+ stopBleNearbyScan(){},currentDevice:()=>null,bleDebug(){},bleDebugError(){},setBleStatus(s){statuses.push(s);},disconnectBleShell:async()=>{},discoverBleShell:async()=>({server:board.gatt,rx:{},tx}),setConnState(){},appendTerminal(){},setBleShellControlsDisabled(disabled){enabled=!disabled;},updateConnectedDeviceUi(){},setBleWorkflowStatus(){},resetBleShellState(){throw new Error('unexpected reset');}});
+ vm.runInContext(code,ctx);await ctx.connectBleShell();
+ assert.equal(disconnects,0);assert.equal(board.gatt.connected,true);assert.equal(enabled,true);assert.match(statuses.at(-1),/status unanswered/);
+});
