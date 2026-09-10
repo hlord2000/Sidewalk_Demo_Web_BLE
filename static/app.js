@@ -2727,15 +2727,25 @@ async function connectBleShellImpl(
   bleLogBleName = chosenDevice.name || "";
 
   const notifyCharacteristic = bleTxCharacteristic;
+  let notificationChunks = 0;
+  let notificationBytes = 0;
   const onNotification = (event) => {
     if (bleDevice !== chosenDevice) return;
-    const chunk = textDecoder.decode(event.target.value, { stream: true });
+    const value = event.target.value;
+    notificationChunks += 1;
+    notificationBytes += value ? value.byteLength : 0;
+    if (notificationChunks === 1 || notificationChunks % 50 === 0) {
+      bleDebug("NUS notification received", { chunks: notificationChunks, bytes: notificationBytes });
+    }
+    const chunk = textDecoder.decode(value, { stream: true });
     appendTerminal(chunk);
     queueBleLogText(chunk);
   };
   notifyCharacteristic.addEventListener("characteristicvaluechanged", onNotification);
   bleNotificationCleanup = () => notifyCharacteristic.removeEventListener("characteristicvaluechanged", onNotification);
+  bleDebug("Starting NUS notifications", { characteristic: notifyCharacteristic.uuid, properties: notifyCharacteristic.properties });
   await notifyCharacteristic.startNotifications();
+  bleDebug("NUS notifications enabled", { chunks: notificationChunks, bytes: notificationBytes });
 
   setConnState(true);
   appendTerminal(`[connected ${bleDevice.name || "device"} over ${bleConnectedProfile.label}]\n`);
@@ -2852,6 +2862,7 @@ function sendBleCommand(command) {
   const generation = bleTransportGeneration;
   const board = serialBoard;
   const characteristic = bleRxCharacteristic;
+  const debugCommand = command.startsWith("prov set ") ? "prov set <redacted>" : command;
   const run = async () => {
     const check = () => {
       if (generation !== bleTransportGeneration ||
@@ -2859,10 +2870,12 @@ function sendBleCommand(command) {
           (!board && !characteristic)) throw new Error("Device shell disconnected; command cancelled");
     };
     check();
+    if (typeof bleDebug === "function") bleDebug("Shell command write started", { command: debugCommand });
     const bytes = textEncoder.encode(`${command}\n`);
     if (board) {
       const writer = board.port.writable.getWriter();
       try { await writer.write(bytes); } finally { writer.releaseLock(); }
+      if (typeof bleDebug === "function") bleDebug("Shell command write completed", { command: debugCommand, bytes: bytes.length });
       return;
     }
     if (!bleConnectedProfile?.textShell) throw new Error("This Bluetooth service does not expose the command shell");
@@ -2882,6 +2895,7 @@ function sendBleCommand(command) {
         throw new Error("The Bluetooth shell characteristic is not writable");
       }
     }
+    if (typeof bleDebug === "function") bleDebug("Shell command write completed", { command: debugCommand, bytes: bytes.length });
   };
   const pending = bleWriteQueue.then(run);
   bleWriteQueue = pending.catch(() => {});
