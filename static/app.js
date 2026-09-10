@@ -2649,7 +2649,6 @@ async function connectBleShellImpl(
 
   // Keep requestDevice in the click's user activation: no network or USB awaits.
   stopBleNearbyScan();
-  const listAllDevices = anyDevice;
   anyDevice = anyDevice || Boolean(config.canProvisionFirmware);
   const selectedDevice = currentDevice();
 
@@ -2663,11 +2662,13 @@ async function connectBleShellImpl(
   });
   setBleStatus("Choose Sidewalk DK WebShell. Older firmware may use a different name.");
   const optionalServices = [BLE_PROFILES[0].serviceUuid];
-  // All entry points require the shell service. A display name alone is not
-  // sufficient: the separate Amazon radio advertiser shares the same board.
-  let filters = (anyDevice || listAllDevices) ? [] : (matchAnyAssigned
-    ? bleAssignedDeviceFilters() : bleRequestFilters(selectedDevice));
-  if (!filters.length) filters = [{ services: [BLE_PROFILES[0].serviceUuid] }];
+  // Some browser/adapter combinations omit scan-response UUIDs from the
+  // chooser. The exact, distinct shell name is in the primary advertisement.
+  // Both paths still discover UART and verify the board identity after connect.
+  const filters = [
+    { name: "Sidewalk DK WebShell" },
+    { services: [BLE_PROFILES[0].serviceUuid] },
+  ];
   const chooserOptions = { filters, optionalServices };
   bleDebug("requestDevice options", chooserOptions);
   const chosenDevice = existingDevice || await navigator.bluetooth.requestDevice(chooserOptions);
