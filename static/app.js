@@ -1497,6 +1497,23 @@ async function ensureDeviceIdentity(device) {
   return device;
 }
 
+async function registerProvisionedDevice(summary) {
+  let device = deviceMap.get(String(summary.id));
+  if (device) Object.assign(device, summary);
+  else {
+    device = summary;
+    devices.push(device);
+    deviceMap.set(String(device.id), device);
+    deviceByWirelessId.set(device.wirelessDeviceId, device);
+    for (const selector of [deviceSelector, document.getElementById("prov-device-select")]) {
+      if (selector) { selector.add(new Option(device.name, String(device.id))); selector.disabled = false; }
+    }
+  }
+  indexDeviceIdentity(device);
+  await activateDevice(device);
+  return device;
+}
+
 async function activateDevice(device) {
   if (!device || !deviceSelector || deviceSelector.value === String(device.id)) {
     return;
@@ -1824,6 +1841,10 @@ let bleLogInFlight = false;
 // Attribution for the current BLE session. Held separately from bleDevice /
 // bleIdentifiedDevice so a flush that lands after the link drops still credits
 // the board the output actually came from.
+let provisioningWriteActive = false;
+let serialBoard = null;
+let serialReader = null;
+let serialReadTask = null;
 let bleLogDeviceId = null;
 let bleLogBleName = "";
 
@@ -1835,11 +1856,12 @@ function setBleLogDeviceId(deviceId) {
 }
 
 function queueBleLogText(text) {
+  if (provisioningWriteActive) return;
   bleLogBuffer += text;
 
   let breakIndex;
   while ((breakIndex = bleLogBuffer.search(/[\r\n]/)) >= 0) {
-    const line = stripAnsi(bleLogBuffer.slice(0, breakIndex)).trim();
+    const line = stripAnsi(bleLogBuffer.slice(0, breakIndex)).trim().replace(/(prov set \d+ \d+ \d+) \S+/g, "$1 [redacted]");
     bleLogBuffer = bleLogBuffer.slice(breakIndex + 1);
     if (line) {
       bleLogQueue.push(line);
@@ -1895,6 +1917,10 @@ async function flushBleLog() {
 }
 
 function appendTerminal(text) {
+  if (provisioningWriteActive) {
+    ingestDeviceEvents(text);
+    return;
+  }
   bleShellRecentText = `${bleShellRecentText}${text}`.slice(-16000);
   updateBleSidewalkStatusFromText();
   updateLocationStatusFromText();
@@ -2448,8 +2474,8 @@ async function runBleLinkWorkflow(workflowName) {
     throw new Error("Another BLE workflow is already running");
   }
 
-  if (!bleRxCharacteristic) {
-    throw new Error("BLE shell is not connected");
+  if (!bleRxCharacteristic && !serialBoard) {
+    throw new Error("Device shell is not connected");
   }
 
   bleWorkflowRunning = true;
@@ -2560,14 +2586,19 @@ async function runLocationAction(action) {
 
 async function connectBleShell(
   source = "connect-button",
-  { matchAnyAssigned = false, anyDevice = false } = {},
+  { matchAnyAssigned = false, anyDevice = false, existingDevice = null } = {},
 ) {
+  if (window.SidewalkProvisioning?.isBusy() && !source.startsWith("provision-wizard") && source !== "automatic-verify") {
+    throw new Error("Device setup is already in progress");
+  }
   if (!navigator.bluetooth) {
-    setBleStatus("Web Bluetooth is not available in this browser");
-    return;
+    throw new Error("Bluetooth is unavailable in this browser. Use USB or open the site in Chrome.");
   }
 
+  if (serialBoard) await disconnectBleShell();
   stopBleNearbyScan();
+  // Authorized customers can connect a blank board before any cloud record exists.
+  anyDevice = anyDevice || Boolean(config.canProvisionFirmware);
   bleManualSession = anyDevice;
 
   let selectedDevice = null;
@@ -2624,14 +2655,14 @@ async function connectBleShell(
     };
   }
   bleDebug("requestDevice options", chooserOptions);
-  bleDevice = await navigator.bluetooth.requestDevice(chooserOptions);
+  bleDevice = existingDevice || await navigator.bluetooth.requestDevice(chooserOptions);
   bleDebug("Chooser selected device", {
     name: bleDevice.name,
     bluetoothDeviceId: bleDevice.id,
     gattConnected: Boolean(bleDevice.gatt && bleDevice.gatt.connected),
   });
 
-  bleDevice.addEventListener("gattserverdisconnected", () => {
+  bleDevice.ongattserverdisconnected = () => {
     bleDebug("GATT disconnected", {
       name: bleDevice && bleDevice.name,
       bluetoothDeviceId: bleDevice && bleDevice.id,
@@ -2648,7 +2679,7 @@ async function connectBleShell(
     }
     setBleStatus("Disconnected");
     appendTerminal("\n[disconnected]\n");
-  });
+  };
 
   bleDebug("Connecting GATT", {
     name: bleDevice.name,
@@ -2732,6 +2763,11 @@ async function connectBleShell(
   appendTerminal(`[connected ${bleDevice.name || "device"} over ${bleConnectedProfile.label}]\n`);
   if (bleConnectedProfile.textShell) {
     setBleShellControlsDisabled(true);
+    if (config.canProvisionFirmware && !source.startsWith("provision-wizard") && source !== "automatic-verify") {
+      if (await window.SidewalkProvisioning.autoProvisionConnected(bleDevice)) return;
+    }
+    if (source === "automatic-verify") return;
+
     setBleStatus("Connected over BLE · verifying Sidewalk identity…");
     setBleWorkflowStatus("Verifying the board against its AWS Sidewalk record…");
     const identityPromise = waitForBleIdentity();
@@ -2797,6 +2833,17 @@ async function connectBleShell(
 }
 
 async function disconnectBleShell() {
+  if (serialBoard) {
+    const board = serialBoard;
+    serialBoard = null;
+    if (serialReader) await serialReader.cancel();
+    if (serialReadTask) await serialReadTask;
+    await board.port.close();
+    resetBleShellState();
+    window.SidewalkProvisioning.onBleDisconnected();
+    setBleStatus("Disconnected");
+    return;
+  }
   if (bleDevice && bleDevice.gatt.connected) {
     bleDevice.gatt.disconnect();
     return;
@@ -2807,8 +2854,14 @@ async function disconnectBleShell() {
 }
 
 async function sendBleCommand(command) {
-  if (!bleRxCharacteristic) {
-    throw new Error("BLE shell is not connected");
+  if (serialBoard) {
+    const writer = serialBoard.port.writable.getWriter();
+    try { await writer.write(textEncoder.encode(`${command}\n`)); }
+    finally { writer.releaseLock(); }
+    return;
+  }
+  if (!bleRxCharacteristic && !serialBoard) {
+    throw new Error("Device shell is not connected");
   }
 
   if (bleConnectedProfile && !bleConnectedProfile.textShell) {
@@ -3254,6 +3307,26 @@ if (window.SidewalkProvisioning) {
   window.SidewalkProvisioning.init({
     currentDevice,
     activateDevice,
+    registerDevice: registerProvisionedDevice,
+    connectedBoard: () => serialBoard || bleDevice,
+    boardConnected: (board) => board.transport === "serial" ? serialBoard === board && !!board.port.readable : !!board.gatt.connected,
+    reconnectBoard: (board) => board.transport === "serial" ? Promise.resolve() : connectBleShell("automatic-verify", { anyDevice: true, existingDevice: board }),
+    readHardwareKey,
+    setProvisioningWriteActive: (active) => {
+      provisioningWriteActive = active;
+      // Shell echo may wrap credential payloads across lines. During writes,
+      // only parse device events; neither display nor upload echoed commands.
+      bleLogBuffer = "";
+    },
+    setBleWorkflowStatus: (message) => {
+      if (bleWorkflowStatus) bleWorkflowStatus.textContent = message;
+    },
+    finishAutomatic: async (state) => {
+      await bindConnectedIdentity(state);
+      setBleShellControlsDisabled(false);
+      setBleStatus(`Connected: ${bleIdentifiedDevice.name}`);
+      setLocationStatus("Ready.");
+    },
     connectBleShell,
     disconnectBleShell,
     sendBleCommand,
@@ -3267,4 +3340,100 @@ if (window.SidewalkHealth) {
 
 if (window.SidewalkMemfault) {
   window.SidewalkMemfault.init({ currentDevice });
+}
+
+const automaticConnectButton = document.getElementById("prov-automatic-connect");
+if (automaticConnectButton) {
+  automaticConnectButton.addEventListener("click", async () => {
+    automaticConnectButton.disabled = true;
+    try {
+      await connectBleShell("automatic-connect", { anyDevice: true });
+    } catch (error) {
+      setBleWorkflowStatus(error.message || String(error));
+    } finally {
+      automaticConnectButton.disabled = false;
+    }
+  });
+}
+
+async function readShellMatch(command, pattern) {
+  bleShellRecentText = "";
+  await sendBleCommand(command);
+  const deadline = Date.now() + 6000;
+  while (Date.now() < deadline) {
+    const match = stripAnsi(bleShellRecentText).match(pattern);
+    if (match) return match[1];
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error("Could not read the board identity. Select the target UART port and retry.");
+}
+
+async function readHardwareKey() {
+  const hardware = await readShellMatch("mflt info", /Memfault hardware ver[ \t]*:[ \t]*([^\r\n]+)[\r\n]/);
+  if (!hardware.trim().endsWith("nrf54l15")) throw new Error("Automatic setup requires nRF54L15 devkit firmware");
+  // nRF54L15 FICR.INFO.DEVICEID[0..1]. Read-only silicon identity stays
+  // constant across browsers, transports, application resets, and retries.
+  const low = await readShellMatch("devmem 0x00ffc304 32", /Read value 0x([0-9a-fA-F]+)[\r\n]/);
+  const high = await readShellMatch("devmem 0x00ffc308 32", /Read value 0x([0-9a-fA-F]+)[\r\n]/);
+  const id = high.padStart(8, "0") + low.padStart(8, "0");
+  if (/^(0{16}|f{16})$/i.test(id)) throw new Error("Board returned an invalid hardware identity");
+  return `nrf54l15:${id.toLowerCase()}`;
+}
+
+async function connectSerialShell() {
+  if (window.SidewalkProvisioning?.isBusy()) throw new Error("Device setup is already in progress");
+  if (!navigator.serial) throw new Error("USB serial is not available in this browser");
+  // Request under the click gesture, before any async disconnect work.
+  const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x1915, usbProductId: 0x0204 }] });
+  await disconnectBleShell();
+  await port.open({ baudRate: 115200, bufferSize: 16384 });
+  await port.setSignals({ dataTerminalReady: true });
+  const board = { transport: "serial", port, name: "Sidewalk Devkit USB" };
+  serialBoard = board;
+  bleLogDeviceId = null;
+  bleLogBleName = board.name;
+  setConnState(true);
+  setBleStatus("Connected over USB · checking device…");
+  const decoder = new TextDecoder();
+  serialReadTask = (async () => {
+    try {
+      serialReader = port.readable.getReader();
+      while (serialBoard === board) {
+        const { value, done } = await serialReader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        appendTerminal(chunk);
+        queueBleLogText(chunk);
+      }
+    } catch (error) {
+      setBleStatus(`USB disconnected: ${error.message}`);
+    } finally {
+      serialReader?.releaseLock();
+      serialReader = null;
+      if (serialBoard === board) {
+        serialBoard = null;
+        resetBleShellState();
+        window.SidewalkProvisioning.onBleDisconnected();
+      }
+    }
+  })();
+  if (await window.SidewalkProvisioning.autoProvisionConnected(board)) return;
+  const identity = waitForBleIdentity();
+  identity.catch(() => {});
+  await sendBleCommand("sid identity");
+  const identified = await identity;
+  setBleShellControlsDisabled(false);
+  setBleStatus(`Connected over USB: ${identified.name}`);
+}
+
+const automaticUsbButton = document.getElementById("prov-automatic-usb");
+if (automaticUsbButton) {
+  automaticUsbButton.addEventListener("click", async () => {
+    automaticUsbButton.disabled = true;
+    try { await connectSerialShell(); }
+    catch (error) {
+      const status = document.getElementById("prov-automatic-status");
+      if (status) status.textContent = error.message;
+    } finally { automaticUsbButton.disabled = false; }
+  });
 }

@@ -3454,3 +3454,16 @@ dialog,
   overflow-wrap: anywhere;
 }
 .loop-memfault > .action-status:empty { display: none; }
+
+/* Device serials must wrap without widening the provisioning grid on phones. */
+.panel-provision [data-wizard-panel] {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.panel-provision .status-box,
+.panel-provision .wizard-status {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

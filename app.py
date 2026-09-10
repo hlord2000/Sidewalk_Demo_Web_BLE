@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import threading
+from uuid import uuid4
 import json
 import logging
 import os
 import queue
+import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from functools import wraps
@@ -564,6 +568,99 @@ def _mfg_values_for_device(device: dict) -> dict[int, bytes]:
     """
     wireless_device_json, device_profile_json, _ = _load_or_refresh_artifacts(device)
     return provisioning.mfg_store_values(wireless_device_json, device_profile_json)
+
+
+# Deployment uses one threaded worker. Persist the reservation before any AWS
+# call; its request token and parameters survive failures and process restarts.
+_automatic_provisioning_lock = threading.Lock()
+
+
+@app.post("/api/provisioning/automatic")
+@login_required
+def automatic_provisioning():
+    user = current_user()
+    if not user or not user.get("active") or not _can_provision_firmware(user):
+        return jsonify(ok=False, error="Not authorized to provision devices"), 403
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify(ok=False, error="A JSON request is required"), 400
+    connection_key = body.get("connectionKey")
+    if (not isinstance(connection_key, str) or not 1 <= len(connection_key) <= 256
+            or body.get("unprovisioned") is not True):
+        return jsonify(ok=False, error="Connect a device and confirm it is unprovisioned first"), 400
+    key = hashlib.sha256(connection_key.encode()).hexdigest()
+    if not _automatic_provisioning_lock.acquire(timeout=1):
+        return jsonify(ok=False, error="Another setup is in progress. Reconnect to retry."), 409
+    try:
+        with store.connect() as conn:
+            row = conn.execute("SELECT * FROM automatic_provisioning WHERE connection_key = ?", (key,)).fetchone()
+            if row and row["user_id"] != user["id"]:
+                return jsonify(ok=False, error="This setup belongs to another account"), 403
+            if not row:
+                if not all((DemoConfig.SIDEWALK_DEVICE_PROFILE_ID, DemoConfig.SIDEWALK_DESTINATION_NAME,
+                            DemoConfig.AWS_IOT_UPLINK_TOPIC, DemoConfig.MEMFAULT_ENABLED,
+                            memfault_service.read_api_configured, DemoConfig.MEMFAULT_HARDWARE_VERSION)):
+                    return jsonify(ok=False, error="Automatic setup is not configured. Contact an administrator."), 503
+                token = str(uuid4())
+                params = dict(
+                    name=f"Sidewalk Devkit {token[:8]}",
+                    description="Automatically provisioned from the device console",
+                    destination_name=DemoConfig.SIDEWALK_DESTINATION_NAME,
+                    location_destination_name=DemoConfig.SIDEWALK_LOCATION_DESTINATION_NAME or DemoConfig.SIDEWALK_DESTINATION_NAME,
+                    device_profile_id=DemoConfig.SIDEWALK_DEVICE_PROFILE_ID,
+                    client_request_token=token,
+                )
+                conn.execute(
+                    "INSERT INTO automatic_provisioning VALUES (?, ?, ?, ?, NULL, ?)",
+                    (key, user["id"], token, json.dumps({"aws": params, "topic": DemoConfig.AWS_IOT_UPLINK_TOPIC}),
+                     datetime.now(timezone.utc).isoformat()),
+                )
+                row = conn.execute("SELECT * FROM automatic_provisioning WHERE connection_key = ?", (key,)).fetchone()
+        reservation = dict(row)
+        if reservation["device_id"]:
+            device = store.get_device_for_user(user, reservation["device_id"])
+            if not device:
+                return jsonify(ok=False, error="Device access is no longer available"), 403
+        else:
+            saved = json.loads(reservation["parameters_json"])
+            params = saved["aws"]
+            created = cloud_service.create_wireless_device(**params)
+            # A crash between the local insert and reservation update must also
+            # reuse the existing device, without transferring its ownership.
+            device = store.device_by_wireless_id_full(created["id"])
+            if device:
+                if not store.get_device_for_user(user, device["id"]):
+                    return jsonify(ok=False, error="Device belongs to another account"), 403
+            else:
+                device = store.create_device_record(
+                    customer_user_id=user["id"] if user["role"] == "customer" else None,
+                    name=params["name"], description=params["description"],
+                    wireless_device_id=created["id"], destination_name=params["destination_name"],
+                    uplink_topic=saved["topic"], device_profile_id=params["device_profile_id"],
+                    ble_name_prefix=DEFAULT_WEB_SHELL_NAME_MATCH,
+                )
+            with store.connect() as conn:
+                conn.execute("UPDATE automatic_provisioning SET device_id = ? WHERE connection_key = ?",
+                             (device["id"], key))
+        _load_or_refresh_artifacts(device)
+        device = store.get_device(device["id"])
+        # Validate credentials before presenting the board with any erase/write.
+        provisioning.mfg_store_values(device["wireless_device_json"], device["device_profile_json"])
+        memfault_result = memfault_service.ensure_device_for(device)
+        if not memfault_result.get("ok"):
+            return jsonify(ok=False, error="Amazon device saved; Memfault setup failed. Reconnect to retry the same device."), 502
+        _sync_topics()
+        response = jsonify(ok=True, device=_device_summary(device), memfault={
+            "registered": True, "deviceSerial": memfault_result.get("deviceSerial"),
+            "dashboardUrl": memfault_result.get("dashboardUrl"),
+        })
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    except Exception:
+        LOGGER.exception("Automatic provisioning failed for user %s", user["id"])
+        return jsonify(ok=False, error="Setup interrupted. Reconnect to retry; the saved Amazon request will be reused."), 502
+    finally:
+        _automatic_provisioning_lock.release()
 
 
 @app.get("/api/devices/<int:device_id>/provisioning-values")
@@ -1286,7 +1383,7 @@ def ble_log():
     ble_name = str(body.get("bleName") or "")[:64]
     lines = []
     for line in posted_lines[:BLE_LOG_MAX_LINES]:
-        text = str(line).strip()
+        text = re.sub(r"(prov set \d+ \d+ \d+) \S+", r"\1 [redacted]", str(line).strip())
         if text:
             lines.append(text[:BLE_LOG_MAX_LINE_CHARS])
 

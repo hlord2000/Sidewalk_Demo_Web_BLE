@@ -508,6 +508,7 @@ class SidewalkCloudService:
         destination_name: str,
         location_destination_name: str,
         device_profile_id: str,
+        client_request_token: str | None = None,
     ) -> dict[str, Any]:
         if self._iot_client is None:
             self._init_iotwireless_client()
@@ -518,7 +519,7 @@ class SidewalkCloudService:
             Description=description or "",
             DestinationName=destination_name,
             Positioning="Enabled",
-            ClientRequestToken=str(uuid4()),
+            ClientRequestToken=client_request_token or str(uuid4()),
             Sidewalk={
                 "DeviceProfileId": device_profile_id,
                 "Positioning": {"DestinationName": location_destination_name},

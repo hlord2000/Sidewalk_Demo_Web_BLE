@@ -90,6 +90,15 @@ class DemoStore:
                     PRIMARY KEY (device_id, customer_user_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS automatic_provisioning (
+                    connection_key TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    request_token TEXT NOT NULL UNIQUE,
+                    parameters_json TEXT NOT NULL,
+                    device_id INTEGER REFERENCES devices(id),
+                    created_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS sensor_readings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     wireless_device_id TEXT NOT NULL,

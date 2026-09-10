@@ -25,6 +25,7 @@
   const ERASE_SETTLE_MS = 400;
   const STEP_ORDER = ["device", "connect", "write", "verify"];
 
+  let automaticRunning = false;
   let hooks = null;
   const els = {};
 
@@ -114,6 +115,7 @@
 
   function onBleDisconnected() {
     connected = false;
+    if (automaticRunning && rebootSent) return;
     if (step === "write" && !rebootSent) {
       clearPendingWait(new Error("BLE disconnected"));
       setWriteStatus(
@@ -134,12 +136,19 @@
 
   async function detectProvisionStatus(timeoutMs) {
     detectedProv = null;
-    await hooks.sendBleCommand("prov status");
-    const event = await waitForDeviceEvent(
+    const reply = waitForDeviceEvent(
       (candidate) => candidate.t === "prov",
       timeoutMs,
       "The device did not answer prov status in time.",
     );
+    reply.catch(() => {});
+    try {
+      await hooks.sendBleCommand("prov status");
+    } catch (error) {
+      clearPendingWait(error);
+      throw error;
+    }
+    const event = await reply;
     detectedProv = event;
     return event;
   }
@@ -192,57 +201,135 @@
     const commands = data.commands || [];
     writeProgress = { done: 0, total: data.valueCount || 0 };
     updateProgress();
-
-    for (let index = 0; index < commands.length; index += 1) {
-      const command = commands[index];
-      const parsed = parseCommand(command);
-      logWrite(`sent: ${describeCommand(parsed)}`);
-      await hooks.sendBleCommand(command);
-
-      if (parsed.kind === "erase") {
-        await sleep(ERASE_SETTLE_MS);
-        continue;
-      }
-
-      if (parsed.kind === "reboot") {
-        rebootSent = true;
-        continue;
-      }
-
-      if (parsed.kind === "set") {
-        // A value can be split across several "prov set" fragments sharing
-        // the same id; the firmware only writes the value (and reports
-        // provwr) once the last fragment lands, so only wait there.
+    hooks.setProvisioningWriteActive?.(true);
+    try {
+      for (let index = 0; index < commands.length; index += 1) {
+        const command = commands[index];
+        const parsed = parseCommand(command);
         const next = commands[index + 1] ? parseCommand(commands[index + 1]) : null;
-        const moreFragmentsComing = next && next.kind === "set" && next.valueId === parsed.valueId;
-        if (moreFragmentsComing) {
-          continue;
+        const lastFragment = parsed.kind === "set" && !(next && next.kind === "set" && next.valueId === parsed.valueId);
+        // Install the waiter before the final BLE write: a fast device may
+        // acknowledge before writeValueWithoutResponse resolves.
+        let reply = null;
+        if (lastFragment || parsed.kind === "finalize") {
+          reply = waitForDeviceEvent(
+            (event) => lastFragment ? event.t === "provwr" && Number(event.id) === parsed.valueId : event.t === "provdone",
+            lastFragment ? PROV_SET_ACK_TIMEOUT_MS : PROV_FINALIZE_TIMEOUT_MS,
+            lastFragment ? `Device did not confirm value ${parsed.valueId}` : "Device did not confirm finalize",
+          );
+          reply.catch(() => {});
         }
-        const event = await waitForDeviceEvent(
-          (candidate) => candidate.t === "provwr" && Number(candidate.id) === parsed.valueId,
-          PROV_SET_ACK_TIMEOUT_MS,
-          `Device did not confirm value ${parsed.valueId} in time`,
-        );
-        if (!event.ok) {
-          throw new Error(`Device rejected value ${parsed.valueId}`);
+        if (parsed.kind === "reboot") rebootSent = true;
+        logWrite(`sent: ${describeCommand(parsed)}`);
+        try {
+          await hooks.sendBleCommand(command);
+          if (parsed.kind === "erase") await sleep(ERASE_SETTLE_MS);
+          if (reply) {
+            const event = await reply;
+            if (!event.ok) throw new Error(`Device rejected ${describeCommand(parsed)}`);
+            if (lastFragment) {
+              writeProgress.done += 1;
+              updateProgress();
+            }
+            logWrite(`recv: ${describeCommand(parsed)} ok`);
+          }
+        } catch (error) {
+          clearPendingWait(error);
+          throw error;
         }
-        writeProgress.done += 1;
-        updateProgress();
-        logWrite(`recv: value ${parsed.valueId} ok`);
-        continue;
       }
+    } finally {
+      hooks.setProvisioningWriteActive?.(false);
+    }
+  }
 
-      if (parsed.kind === "finalize") {
-        const event = await waitForDeviceEvent(
-          (candidate) => candidate.t === "provdone",
-          PROV_FINALIZE_TIMEOUT_MS,
-          "Device did not confirm finalize in time",
-        );
-        logWrite(`recv: finalize ${event.ok ? "ok" : "failed"}`);
-        if (!event.ok) {
-          throw new Error(event.err ? `Finalize failed: ${event.err}` : "Finalize failed");
+  function automaticStatus(message, kind = "working") {
+    const status = document.getElementById("prov-automatic-status");
+    if (status) {
+      status.textContent = message;
+      status.dataset.state = kind;
+    }
+    hooks.setBleWorkflowStatus(message);
+  }
+
+  async function autoProvisionConnected(board) {
+    if (automaticRunning || busy || !window.DEMO_CONFIG.canProvisionFirmware) return false;
+    automaticRunning = true;
+    busy = true;
+    let created = false;
+    try {
+      connected = true;
+      automaticStatus("Checking whether this device needs setup…");
+      const state = await detectProvisionStatus(PROV_STATUS_TIMEOUT_MS);
+      if (state.provisioned !== false) {
+        automaticStatus("This device is already provisioned.", "success");
+        return false;
+      }
+      automaticStatus("Creating the Amazon and Memfault devices…");
+      const response = await fetch("/api/provisioning/automatic", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ connectionKey: await hooks.readHardwareKey(), unprovisioned: true }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error || "Cloud setup failed");
+      device = await hooks.registerDevice(result.device);
+      created = true;
+      hooks.setBleLogDeviceId(device.id);
+      await reportStatus("attempted", "Automatic setup");
+      // Cloud requests can take time. Recheck the same physical connection
+      // immediately before erasing; never replace an existing identity.
+      if (!hooks.boardConnected(board) || hooks.connectedBoard() !== board) throw new Error("The connected board changed");
+      const beforeWrite = await detectProvisionStatus(PROV_STATUS_TIMEOUT_MS);
+      if (beforeWrite.provisioned !== false) throw new Error("Device is already provisioned; credentials were not overwritten");
+      step = "write";
+      rebootSent = false;
+      clearWriteLog();
+      automaticStatus("Amazon and Memfault are ready. Uploading certificates…");
+      render();
+      await runRealScript(await fetchScript());
+      await reportStatus("succeeded", "Certificates uploaded; awaiting reboot verification");
+      step = "verify";
+      automaticStatus("Certificates uploaded. Reconnecting to verify…");
+      render();
+      const deadline = Date.now() + 45000;
+      // Wait for the requested reboot, then reconnect the already-authorized
+      // BluetoothDevice; no second chooser or user gesture is needed.
+      if (board.transport !== "serial") {
+        while (hooks.boardConnected(board) && Date.now() < deadline) await sleep(250);
+        if (hooks.boardConnected(board)) throw new Error("Device did not reboot after certificate upload");
+      } else {
+        // The nRF52833 UART bridge remains enumerated while the target reboots.
+        await sleep(2500);
+      }
+      let verified = false;
+      while (Date.now() < deadline && !verified) {
+        await sleep(1500);
+        try {
+          await hooks.reconnectBoard(board);
+          connected = true;
+          const state = await detectProvisionStatus(PROV_STATUS_TIMEOUT_MS);
+          const expected = normalizeSmsn(device.sidewalkSmsn);
+          if (state.provisioned && expected && normalizeSmsn(state.smsn) === expected) verified = true;
+          else if (state.provisioned) throw new Error("Device identity does not match the new Amazon device");
+        } catch (error) {
+          if (Date.now() >= deadline) throw error;
         }
       }
+      if (!verified) throw new Error("Certificate upload finished, but reconnect verification timed out");
+      await reportStatus("verified", `smsn=${detectedProv.smsn}`);
+      await hooks.finishAutomatic(detectedProv);
+      setVerifyStatus("Verified.", "success");
+      automaticStatus(`Ready: ${device.name}. Amazon, Memfault, and device certificates verified.`, "success");
+      return true;
+    } catch (error) {
+      if (created) await reportStatus("failed", error.message);
+      automaticStatus(`Setup stopped: ${error.message}. Reconnect to retry.`, "error");
+      throw error;
+    } finally {
+      busy = false;
+      automaticRunning = false;
+      render();
     }
   }
 
@@ -691,6 +778,10 @@
 
   function render() {
     renderStepper();
+    for (const id of ["prov-automatic-connect", "prov-automatic-usb", "prov-device-select"]) {
+      const element = document.getElementById(id);
+      if (element) element.disabled = busy;
+    }
     for (const panel of Object.values(els.panels)) {
       if (panel) {
         panel.hidden = true;
@@ -706,6 +797,7 @@
   }
 
   function chooseDevice(id) {
+    if (busy) return;
     device = findDevice(id);
     detectedProv = null;
     connected = false;
@@ -831,7 +923,7 @@
     // The dashboard-wide device selector lives on the Monitor tab, so pick
     // up whatever it points to whenever this tab becomes visible.
     document.addEventListener("tab:activated", (event) => {
-      if (!event.detail || event.detail.target !== "provision" || !hooks.currentDevice) {
+      if (busy || !event.detail || event.detail.target !== "provision" || !hooks.currentDevice) {
         return;
       }
       const active = hooks.currentDevice();
@@ -844,5 +936,5 @@
     chooseDevice(initial ? initial.id : "");
   }
 
-  window.SidewalkProvisioning = { init, ingestEvent, onBleDisconnected };
+  window.SidewalkProvisioning = { init, ingestEvent, onBleDisconnected, autoProvisionConnected, isBusy: () => busy };
 })();

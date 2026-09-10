@@ -9,10 +9,10 @@
 <script defer src="{{ url_for('static', filename='vendor/dap.umd.js', v='20260423webusb') }}"></script>
 <script defer src="{{ url_for('static', filename='ui.js', v='20260908guide') }}"></script>
 <script defer src="{{ url_for('static', filename='sensors.js', v='20260618tsfix') }}"></script>
-<script defer src="{{ url_for('static', filename='provisioning.js', v='20260820wizard') }}"></script>
+<script defer src="{{ url_for('static', filename='provisioning.js', v='20260910automatic2') }}"></script>
 <script defer src="{{ url_for('static', filename='health.js', v='20260820health') }}"></script>
 <script defer src="{{ url_for('static', filename='memfault_analytics.js', v='20260909registration') }}"></script>
-<script defer src="{{ url_for('static', filename='app.js', v='20260909bledisconnect') }}"></script>
+<script defer src="{{ url_for('static', filename='app.js', v='20260910automatic2') }}"></script>
 {% endblock %}
 {% block body %}
 <main class="page-shell app-shell">
@@ -357,13 +357,16 @@
 
       {% if not page_config.canProvisionFirmware %}
       <p class="muted">Your account cannot provision devices. Ask an admin to enable this for your account.</p>
-      {% elif not page_config.devices %}
-      <div class="empty-state">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 4-6"/></svg>
-        <h3>No device assigned</h3>
-        <p>An admin needs to assign an AWS Sidewalk device to this account first.</p>
-      </div>
       {% else %}
+      <p>Connect an unprovisioned device to automatically create its Amazon and Memfault records and upload its certificates.</p>
+      <div class="inline-actions">
+        <button type="button" id="prov-automatic-connect">Connect over Bluetooth</button>
+        <button type="button" id="prov-automatic-usb">Connect over USB</button>
+      </div>
+      <p class="muted">For USB, choose the target UART port (interface 02) on your Sidewalk Devkit.</p>
+      <p id="prov-automatic-status" class="wizard-status" role="status" aria-live="polite">Automatic setup is enabled for your account.</p>
+      <hr>
+      <p class="muted">Or use the steps below to provision an existing cloud record.</p>
       <ol class="wizard-steps" id="prov-steps">
         <li class="wizard-step" data-wizard-step="device"><span class="wizard-step-index">1</span><span>Device</span></li>
         <li class="wizard-step" data-wizard-step="connect"><span class="wizard-step-index">2</span><span>Connect</span></li>

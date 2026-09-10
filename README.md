@@ -218,6 +218,48 @@ The read API (device health, reboot counts) has not been verified against a
 live Memfault account. Response shapes are normalized defensively and logged
 at debug level so field mapping can be corrected once real credentials exist.
 
+## Automatic customer provisioning
+
+Customers marked **can provision**, and administrators, can connect a blank
+Sidewalk Devkit on the Provision tab using Bluetooth or USB. No pre-created or
+assigned cloud device is required. The browser checks `prov status`, requests
+Amazon and Memfault device creation, uploads the certificate values, reboots,
+and verifies that the board's SMSN matches the new Amazon record. A provisioned
+board is left intact. USB uses the debugger's target UART, interface 02, at
+115200 baud; the bridge stays connected while the nRF54L15 reboots.
+
+`POST /api/provisioning/automatic` checks the current user's active account and
+provisioning permission on every request. New records belong to the requesting
+customer. The endpoint requires JSON with `connectionKey` and
+`unprovisioned: true`; the browser supplies the read-only nRF54L15 silicon ID
+from FICR.INFO.DEVICEID, after identifying the firmware with `mflt info`.
+This ID correlates retries; it is not a hardware authentication credential.
+
+Set `SIDEWALK_DEVICE_PROFILE_ID`, `SIDEWALK_DESTINATION_NAME`,
+`AWS_IOT_UPLINK_TOPIC`, and the existing Memfault registration settings before
+use. The `automatic_provisioning` SQLite table reserves the request and its
+Amazon parameters before cloud creation. Retries reuse the same AWS
+ClientRequestToken, local record, and SMSN. A Memfault failure stops certificate
+upload but preserves the Amazon record for retry. The current deployment uses
+one threaded worker; its creation lock serializes requests in that worker.
+
+Credentials travel over the existing permission-gated provisioning-script
+endpoint. Raw shell logs redact `prov set` credential payloads. Automatic setup
+requires the devkit's diagnostic shell (`mflt info`, read-only `devmem`, and
+`prov` commands). Browser permission to select a USB/Bluetooth device is still
+required. The embedded browser supports USB serial; use a Web Bluetooth-capable
+browser for the Bluetooth path.
+
+Verification:
+
+```sh
+python -m pytest -q
+node --test tests/provisioning_browser.test.cjs
+```
+
+The cloud retry behavior follows [AWS CreateWirelessDevice idempotency](https://docs.aws.amazon.com/iot-wireless/2020-11-22/apireference/API_CreateWirelessDevice.html).
+Memfault registration uses the [create-device API](https://docs.memfault.com/api/create-devices).
+
 ## BLE NUS Provisioning
 
 A blank device has Sidewalk credentials in AWS (or in a `certificate.json`
