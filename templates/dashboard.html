@@ -9,10 +9,10 @@
 <script defer src="{{ url_for('static', filename='vendor/dap.umd.js', v='20260423webusb') }}"></script>
 <script defer src="{{ url_for('static', filename='ui.js', v='20260908guide') }}"></script>
 <script defer src="{{ url_for('static', filename='sensors.js', v='20260618tsfix') }}"></script>
-<script defer src="{{ url_for('static', filename='provisioning.js', v='20260910webshell1') }}"></script>
+<script defer src="{{ url_for('static', filename='provisioning.js', v='20260910webshell2') }}"></script>
 <script defer src="{{ url_for('static', filename='health.js', v='20260820health') }}"></script>
 <script defer src="{{ url_for('static', filename='memfault_analytics.js', v='20260909registration') }}"></script>
-<script defer src="{{ url_for('static', filename='app.js', v='20260910webshell1') }}"></script>
+<script defer src="{{ url_for('static', filename='app.js', v='20260910webshell2') }}"></script>
 {% endblock %}
 {% block body %}
 <main class="page-shell app-shell">
@@ -196,7 +196,7 @@
           </span>
         </div>
 
-        <p class="muted">Choose <strong>Sidewalk DK WebShell</strong> for local control. Older firmware may appear as Sidewalk.</p>
+        <p class="muted">Choose <strong>Sidewalk DK WebShell</strong> for local control. Older firmware may use a different name. Only UART shell devices are listed.</p>
         <p id="ble-availability" class="muted" role="status" hidden></p>
         <p id="ble-status" class="conn-state conn-state--off">Disconnected</p>
 

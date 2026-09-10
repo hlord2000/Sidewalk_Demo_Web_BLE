@@ -2661,7 +2661,7 @@ async function connectBleShellImpl(
     wirelessDeviceId: selectedDevice && selectedDevice.wirelessDeviceId,
     identityFingerprint: selectedDevice && selectedDevice.identityFingerprint,
   });
-  setBleStatus("Choose Sidewalk DK WebShell. Older firmware may appear as Sidewalk.");
+  setBleStatus("Choose Sidewalk DK WebShell. Older firmware may use a different name.");
   const optionalServices = [BLE_PROFILES[0].serviceUuid];
   // All entry points require the shell service. A display name alone is not
   // sufficient: the separate Amazon radio advertiser shares the same board.
